@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from socioscope.socioscope import main
+from socioscope.cli import main
 
 def test_main_no_arguments_exclamation():
     with patch('subprocess.run') as mock_run:
