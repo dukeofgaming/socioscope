@@ -1,0 +1,4 @@
+
+
+- Whisper-CPP
+- SoX
