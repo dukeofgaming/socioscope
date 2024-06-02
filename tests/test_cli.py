@@ -3,9 +3,12 @@ from unittest.mock import patch
 
 from socioscope import cli
 
+@patch('sys.argv', [cli.__package__, '-h'])
 def test_that_cli_help_message_displays_correctly(capfd):
-    with patch('sys.argv', ['cli.__package__', '-h']), pytest.raises(SystemExit):
+    
+    with pytest.raises(SystemExit):
         cli.main()
+    
     out, err = capfd.readouterr()
     assert f"usage: {cli.__package__} [-h]" in out
     assert "show this help message and exit" in out
