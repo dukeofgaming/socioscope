@@ -24,8 +24,9 @@ def test_transcribe_m4a_file(capfd):
 
 @patch.object(sys, 'argv', new=['cli', 'transcribe', 'audio.mp3'])
 def test_transcribe_fail_on_non_m4a_file(capfd):
-    with pytest.raises(SystemExit):
+    try:
         cli.main()
-    out, err = capfd.readouterr()
-    assert "Error: The file must be an m4a audio file." in out
+    except ValueError as exception:
+        out, err = capfd.readouterr()
+        assert "The file must be an m4a audio file." in err
 

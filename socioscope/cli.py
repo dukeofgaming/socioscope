@@ -1,6 +1,7 @@
 import argparse
-import subprocess
 import sys
+
+from socioscope import transcribe
 
 def main():
     parser = argparse.ArgumentParser(
@@ -28,12 +29,12 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'transcribe':
-        file_path = args.file
-        if not file_path.lower().endswith('.m4a'):
-            print("Error: The file must be an m4a audio file.")
-            sys.exit(1)
-        
-        print(f"Transcribing {args.file}...")
+
+        try:
+            transcribe.transcribe_audio(args.file)
+        except ValueError as exception:
+            print(exception, file=sys.stderr)
+
     else:
         parser.print_help()
         
