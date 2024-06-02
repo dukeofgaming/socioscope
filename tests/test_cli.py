@@ -4,7 +4,7 @@ import sys
 from unittest.mock import patch
 
 
-from socioscope import cli
+from socioscope import cli, messages
 
 #Arrange
 @patch.object(sys, 'argv', new=[cli.__package__, '-h'])
@@ -32,8 +32,9 @@ def test_transcribe_m4a_file(capfd):
 def test_error_transcribe_audio_format(capfd):
     #Act
     cli.main()
-    out, err = capfd.readouterr()
+    out, error = capfd.readouterr()
 
     #Assert
-    assert "The file must be an audio file." in err
-    
+    assert messages.INVALID_AUDIO_TRANSCRIPTION_FORMAT.format(
+        file_extensions=''
+    ) in error
