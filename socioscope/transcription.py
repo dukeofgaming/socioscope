@@ -1,7 +1,7 @@
 import subprocess
 from socioscope import messages
 
-supported_audio_formats = (".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg")
+supported_audio_formats = (".wav")
 
 def transcribe_audio(file_path):
 
@@ -14,6 +14,9 @@ def transcribe_audio(file_path):
     
     print(f"Transcribing {file_path}...")
 
+    run_whisper(file_path)
+
+def run_whisper(file_path):
     command = [
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-large-v3.bin',     # Model file path
