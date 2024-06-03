@@ -9,7 +9,7 @@ from socioscope import cli
 def test_functional_transcribe_wav_file(capfd):
     #Arrange
     wav_file_path = './tests/data/jfk.wav'
-    txt_file_path = f"{wav_file_path}.txt"
+    txt_file_path = f"{wav_file_path}.csv"
     if os.path.exists(txt_file_path):
         os.remove(txt_file_path)
     

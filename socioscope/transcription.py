@@ -16,9 +16,9 @@ def transcribe_audio(file_path):
 
     command = [
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
-        '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
+        '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-large-v3.bin',     # Model file path
         '--file', file_path,     # Input audio file path
-        '--output-txt'     # Output file path (if needed)
+        '--output-csv'          # Output file path (if needed)
     ]
 
     subprocess.run(command, check=True)

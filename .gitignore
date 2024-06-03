@@ -179,4 +179,5 @@ pyrightconfig.json
 ### Socioscope
 #Test models & data
 tests/.models/*
-tests/data/jfk.wav.txt
+tests/data/*.txt
+tests/data/*.csv
