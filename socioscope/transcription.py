@@ -28,6 +28,7 @@ def transcribe_audio(file_path):
 def run_whisper(file_path):
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
+        '--threads', '16',      # TODO: Parametrize, but default to max available
         # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-large-v3.bin',     # Model file path
         '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
         '--file', file_path,     # Input audio file path
