@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from socioscope import transcribe
+from socioscope import transcription
 
 def main():
     parser = argparse.ArgumentParser(
@@ -31,7 +31,7 @@ def main():
     if args.command == 'transcribe':
 
         try:
-            transcribe.transcribe_audio(args.file)
+            transcription.transcribe_audio(args.file)
         except ValueError as exception:
             print(exception, file=sys.stderr)
 
