@@ -181,3 +181,5 @@ pyrightconfig.json
 tests/.models/*
 tests/data/*.txt
 tests/data/*.csv
+
+tests/data/recordings/
