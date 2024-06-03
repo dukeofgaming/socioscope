@@ -1,7 +1,10 @@
 import argparse
+import os
 import sys
 
 from socioscope import transcription
+
+os.environ['GGML_METAL_PATH_RESOURCES'] = '/opt/homebrew/share/whisper-cpp'
 
 def main():
     parser = argparse.ArgumentParser(
