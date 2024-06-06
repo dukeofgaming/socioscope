@@ -8,13 +8,13 @@ from socioscope import cli
 @patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/jfk.wav'])
 def test_functional_transcribe_wav_file(capfd):
     #Arrange
-    wav_file_path           = './tests/data/jfk.wav'
-    transcription_file_path = f"{wav_file_path}.csv"
+    audio_file_path           = sys.argv[2]
+    transcription_file_path = f"./tests/data/jfk/transcription.csv"
 
     if os.path.exists(transcription_file_path):
         os.remove(transcription_file_path)
     
-    assert os.path.exists(wav_file_path)
+    assert os.path.exists(audio_file_path)
     
     #Act
     cli.main()
@@ -23,12 +23,11 @@ def test_functional_transcribe_wav_file(capfd):
     assert os.path.exists(transcription_file_path)
 
 
-@patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/recordings/N Ninth St 3.m4a'])
+@patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/fdr.mp3'])
 def test_functional_transcribe_m4a_file(capfd):
     #Arrange
-    m4a_file_path           = './tests/data/recordings/N Ninth St 3.m4a'
-    wav_file_path           = f"{os.path.splitext(m4a_file_path)[0]}.wav"
-    transcription_csv_path  = f"{wav_file_path}.csv"
+    wav_file_path           = "./tests/data/fdr/converted.wav"
+    transcription_csv_path  = "./tests/data/fdr/transcription.csv"
 
     if os.path.exists(wav_file_path):
         os.remove(wav_file_path)
@@ -38,7 +37,7 @@ def test_functional_transcribe_m4a_file(capfd):
 
     #Act
     cli.main()
-    assert os.path.exists(wav_file_path)
 
     #Assert
+    assert os.path.exists(wav_file_path)
     assert os.path.exists(transcription_csv_path)

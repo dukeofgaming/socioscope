@@ -3,7 +3,7 @@ import sys
 
 from unittest.mock import patch
 
-from socioscope import cli, messages
+from socioscope import cli, messages, transcription
 
 #Arrange
 @patch.object(sys, 'argv', new=[cli.__package__, '-h'])
@@ -30,3 +30,18 @@ def test_error_transcribe_audio_format(capfd):
     assert messages.INVALID_AUDIO_TRANSCRIPTION_FORMAT.format(
         file_extensions=''
     ) in error
+
+@patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', 'mock_directory'])
+@patch.object(transcription, 'transcribe_audio')
+@patch('os.listdir')
+@patch('os.path.isdir')
+def test_transcribe_directory(mock_isdir, mock_listdir, mock_transcribe_audio):
+    #Arrange
+    mock_isdir.return_value = True
+    mock_listdir.return_value = ['mock_file1.wav', 'mock_file2.wav', 'mock_file3.wav']
+
+    #Act
+    cli.main()
+
+    #Assert
+    assert mock_transcribe_audio.call_count == 3

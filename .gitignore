@@ -183,3 +183,8 @@ tests/data/*.txt
 tests/data/*.csv
 
 tests/data/recordings/
+tests/data/fdr/
+tests/data/jfk/
+
+#DS_store
+.DS_store

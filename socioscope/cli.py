@@ -33,10 +33,22 @@ def main():
 
     if args.command == 'transcribe':
 
-        try:
-            transcription.transcribe_audio(args.file)
-        except ValueError as exception:
-            print(exception, file=sys.stderr)
+        files_to_transcribe = []
+        
+        if os.path.isdir(args.file):
+            for file in os.listdir(args.file):
+                files_to_transcribe.append(os.path.join(args.file, file))
+        else:
+            files_to_transcribe.append(args.file)
+
+
+        for file in files_to_transcribe:
+            try:
+                transcription.transcribe_audio(file)
+            except ValueError as exception:
+                print(exception, file=sys.stderr)
+            except Exception as exception:
+                print(exception, file=sys.stderr)
 
     else:
         parser.print_help()

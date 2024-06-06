@@ -2,12 +2,19 @@ import os
 import subprocess
 from socioscope import messages
 
-supported_audio_formats = (".wav", ".m4a")
+supported_audio_formats = (".wav", ".m4a", ".mp3")
 
 def transcribe_audio(file_path):
+    file_name                   = os.path.basename(file_path)
+    file_extension              = os.path.splitext(file_path)[1]
+    file_name_without_extension = os.path.splitext(file_name)[0]
+    file_directory              = os.path.dirname(file_path)
+    output_directory_path       = os.path.join(
+        file_directory, 
+        file_name_without_extension
+    )
 
-    #Get file extension from path
-    file_extension = os.path.splitext(file_path)[1]
+    os.makedirs(output_directory_path, exist_ok=True)
 
     if not file_extension in supported_audio_formats:
         raise ValueError(
@@ -18,30 +25,49 @@ def transcribe_audio(file_path):
     
     if file_extension != ".wav":
         convert_to_wav(file_path)
-        file_path = os.path.splitext(file_path)[0] + ".wav" # Update file path to the converted file
+        # file_path = os.path.join(output_directory_path, "converted.wav")
     
     print(f"Transcribing {file_path}...")
 
-    run_whisper(file_path)
+    run_whisper(file_path, output_directory_path)
+
+    #TODO: Change to method for handling tmp files that is safer for concurrency
+    # if not is_wav:
+    #     print(f"Removing converted WAV: {file_path}...")
+    #     os.remove(file_path)
 
 
-def run_whisper(file_path):
+def run_whisper(file_path, output_directory_path):
+    file_name                   = os.path.basename(file_path)
+    file_extension              = os.path.splitext(file_path)[1]
+    file_name_without_extension = os.path.splitext(file_name)[0]
+    file_directory              = os.path.dirname(file_path)
+    # output_directory_path       = os.path.join(file_directory, file_name_without_extension)
+
+    
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--threads', '16',      # TODO: Parametrize, but default to max available
         # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-large-v3.bin',     # Model file path
         '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
-        '--file', file_path,     # Input audio file path
-        '--output-csv'          # Output file path (if needed)
-    ], check=True)
+        # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-medium.en.bin',     # Model file path
+        '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
+        '--output-file', f"{output_directory_path}/transcription",      # Output file path
+        '--output-csv'                                              # Output format
+    ], check=True) 
 
 
 def convert_to_wav(file_path):
-    base                = os.path.basename(file_path)   #TODO: See if this is necessary
-    directory           = os.path.dirname(file_path)
+    file_name                   = os.path.basename(file_path)
+    file_name_without_extension = os.path.splitext(file_name)[0]
+    file_directory              = os.path.dirname(file_path)
+    output_directory_path       = os.path.join(file_directory, file_name_without_extension)
 
-    name_without_ext    = os.path.splitext(base)[0]
-    output_file_path    = os.path.join(directory, f"{name_without_ext}.wav")
+    # file_name                = os.path.basename(file_path)   #TODO: See if this is necessary
+    # file_directory           = os.path.dirname(file_path)
+
+    # name_without_ext    = os.path.splitext(file_name)[0]
+    output_file_path    = os.path.join(output_directory_path, f"converted.wav")
 
     print(f"Converting {file_path} to {output_file_path}...")
     
