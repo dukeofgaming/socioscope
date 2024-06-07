@@ -38,7 +38,11 @@ def test_error_transcribe_audio_format(capfd):
 def test_transcribe_directory(mock_isdir, mock_listdir, mock_transcribe_audio):
     #Arrange
     mock_isdir.return_value = True
-    mock_listdir.return_value = ['mock_file1.wav', 'mock_file2.wav', 'mock_file3.wav']
+    mock_listdir.return_value = [
+        'mock_file1.wav', 
+        'mock_file2.wav', 
+        'mock_file3.wav'
+    ]
 
     #Act
     cli.main()
