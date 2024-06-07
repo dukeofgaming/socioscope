@@ -10,7 +10,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'socioscope=socioscope:main',
+            'socioscope=socioscope.cli:main',
         ],
     },
 )
