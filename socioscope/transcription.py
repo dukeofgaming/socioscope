@@ -24,27 +24,16 @@ def transcribe_audio(file_path):
         )
     
     if file_extension != ".wav":
-        convert_to_wav(file_path)
-        # file_path = os.path.join(output_directory_path, "converted.wav")
+        convert_to_wav(file_path, output_directory_path)
     
     print(f"Transcribing {file_path}...")
 
     run_whisper(file_path, output_directory_path)
 
-    #TODO: Change to method for handling tmp files that is safer for concurrency
-    # if not is_wav:
-    #     print(f"Removing converted WAV: {file_path}...")
-    #     os.remove(file_path)
-
 
 def run_whisper(file_path, output_directory_path):
-    file_name                   = os.path.basename(file_path)
     file_extension              = os.path.splitext(file_path)[1]
-    file_name_without_extension = os.path.splitext(file_name)[0]
-    file_directory              = os.path.dirname(file_path)
-    # output_directory_path       = os.path.join(file_directory, file_name_without_extension)
 
-    
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--threads', '16',      # TODO: Parametrize, but default to max available
@@ -53,20 +42,11 @@ def run_whisper(file_path, output_directory_path):
         # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-medium.en.bin',     # Model file path
         '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
         '--output-file', f"{output_directory_path}/transcription",      # Output file path
-        '--output-csv'                                              # Output format
+        '--output-csv'                                                  # Output format
     ], check=True) 
 
 
-def convert_to_wav(file_path):
-    file_name                   = os.path.basename(file_path)
-    file_name_without_extension = os.path.splitext(file_name)[0]
-    file_directory              = os.path.dirname(file_path)
-    output_directory_path       = os.path.join(file_directory, file_name_without_extension)
-
-    # file_name                = os.path.basename(file_path)   #TODO: See if this is necessary
-    # file_directory           = os.path.dirname(file_path)
-
-    # name_without_ext    = os.path.splitext(file_name)[0]
+def convert_to_wav(file_path, output_directory_path):
     output_file_path    = os.path.join(output_directory_path, f"converted.wav")
 
     print(f"Converting {file_path} to {output_file_path}...")
@@ -75,6 +55,6 @@ def convert_to_wav(file_path):
         'ffmpeg', 
         '-i', file_path, 
         '-ar', '16000',     # Audio rate supported by whisper-cpp
-        '-y',               #TODO: Optimize # Overwrite output file if it exists
+        '-y',               
         output_file_path
     ], check=True)
