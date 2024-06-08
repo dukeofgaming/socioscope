@@ -42,7 +42,8 @@ def run_whisper(file_path, output_directory_path):
         # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-medium.en.bin',     # Model file path
         '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
         '--output-file', f"{output_directory_path}/transcription",      # Output file path
-        '--output-csv'                                                  # Output format
+        # '--output-csv'                                                  # Output format
+        '--output-srt'
     ], check=True) 
 
 

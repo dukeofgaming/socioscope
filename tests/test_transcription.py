@@ -9,7 +9,7 @@ from socioscope import cli
 def test_functional_transcribe_wav_file():
     #Arrange
     audio_file_path           = sys.argv[2]
-    transcription_file_path = f"./tests/data/jfk/transcription.csv"
+    transcription_file_path = f"./tests/data/jfk/transcription.srt"
 
     if os.path.exists(transcription_file_path):
         os.remove(transcription_file_path)
@@ -24,10 +24,10 @@ def test_functional_transcribe_wav_file():
 
 
 @patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/fdr.mp3'])
-def test_functional_transcribe_m4a_file():
+def test_functional_transcribe_mp3_file():
     #Arrange
     wav_file_path           = "./tests/data/fdr/converted.wav"
-    transcription_csv_path  = "./tests/data/fdr/transcription.csv"
+    transcription_csv_path  = "./tests/data/fdr/transcription.srt"
 
     if os.path.exists(wav_file_path):
         os.remove(wav_file_path)
