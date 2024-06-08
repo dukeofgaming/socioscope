@@ -1,15 +1,18 @@
 
 ### Backlog
 
-- [ ] Transcribe parallelized  
-- [ ] Transcribe folder  
 - [ ] Externalize model config using CLI  
-- [ ] transcribe m4a file  
+- [ ] Add diarization  
+- [ ] Add automatic volume normalization  
+- [ ] Add dependency installer  
+- [ ] Transcribe parallelized  
 
 ### Doing
 
-- [ ] Transcribe wav file  
+- [ ] Transcribe folder  
 
 ### Done
 
+- [ ] transcribe m4a file  
+- [ ] Transcribe wav file  
 

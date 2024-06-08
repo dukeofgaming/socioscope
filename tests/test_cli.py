@@ -1,3 +1,4 @@
+import os
 import pytest
 import sys
 
@@ -35,15 +36,29 @@ def test_error_transcribe_audio_format(capfd):
 @patch.object(transcription, 'transcribe_audio')
 @patch('os.listdir')
 @patch('os.path.isdir')
-def test_transcribe_directory(mock_isdir, mock_listdir, mock_transcribe_audio):
+@patch('os.path.isfile')
+def test_transcribe_directory(
+        mock_isfile,
+        mock_isdir, 
+        mock_listdir, 
+        mock_transcribe_audio
+    ):
+    
     #Arrange
     mock_isdir.return_value = True
     mock_listdir.return_value = [
         'mock_file1.wav', 
         'mock_file2.wav', 
-        'mock_file3.wav'
+        'mock_file3.wav',
+        'somedirectory'
     ]
 
+    mock_isfile.side_effect = lambda file: (
+        file.endswith(
+            transcription.supported_audio_formats
+        )
+    )
+    
     #Act
     cli.main()
 

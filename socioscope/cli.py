@@ -37,7 +37,11 @@ def main():
         
         if os.path.isdir(args.file):
             for file in os.listdir(args.file):
-                files_to_transcribe.append(os.path.join(args.file, file))
+
+                file_path = os.path.join(args.file, file)
+
+                if os.path.isfile(file_path):
+                    files_to_transcribe.append(file_path)
         else:
             files_to_transcribe.append(args.file)
 
