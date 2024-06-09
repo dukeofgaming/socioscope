@@ -1,6 +1,11 @@
 import os
 import subprocess
+
 from socioscope import messages
+
+from pyAudioAnalysis import audioSegmentation
+import pandas
+
 
 supported_audio_formats = (".wav", ".m4a", ".mp3")
 
