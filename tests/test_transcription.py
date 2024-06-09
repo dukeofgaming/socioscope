@@ -42,7 +42,13 @@ def test_functional_transcribe_mp3_file():
     assert os.path.exists(wav_file_path)
     assert os.path.exists(transcription_csv_path)
 
-@patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/fdr.mp3'])
+@patch.object(sys, 'argv', new=[cli.__package__, 'transcribe', './tests/data/fjk-rmn.mp3'])
 def test_functional_diarize():
+    # Arrange & act
+    transcription_json_path = "./tests/data/jfk-rmn/transcription.json"
 
+    cli.main()
+    assert os.path.exists(transcription_json_path)
+
+    # Assert
     assert os.path.exists("./tests/data/jfk-rmn/diarization.json")
