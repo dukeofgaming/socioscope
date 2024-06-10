@@ -1,7 +1,6 @@
 
 ### Backlog
 
-- [ ] Add transcript diarization  
 - [ ] Add automatic volume normalization  
 - [ ] Add dependency installer  
 - [ ] Transcribe parallelized  
@@ -9,6 +8,7 @@
 
 ### Doing
 
+- [ ] Add transcript diarization  
 
 ### Done
 

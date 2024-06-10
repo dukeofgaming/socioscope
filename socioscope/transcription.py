@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 
@@ -104,26 +105,36 @@ def diarization(file_path):
 
     huggingface_token = config['huggingface_token']
 
-    print("Diarizing: preparing pipeline")
+    print("Diarization: preparing pipeline")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         use_auth_token=huggingface_token
     )
 
     # send pipeline to GPU (metal)
-    print("Diarizing: sending pipeline to GPU")
+    print("Diarization: sending pipeline to GPU")
     pipeline.to(torch.device("mps"))
 
 
-    print("Diarizing: running pipeline")
+    print("Diarization: running pipeline")
     diarization = pipeline(
         get_source_wav_path(file_path)
     )
-    # print the result
+
+    diarization_segments = []
+    
     for turn, _, speaker in diarization.itertracks(yield_label=True):
         print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
+        diarization_segments.append({
+            "start": turn.start,
+            "end": turn.end,
+            "speaker": speaker
+        })
 
-    print("Diarizing: writing RTTM")
+    with open(os.path.join(output_directory_path,"diarization.json"),"w") as diarization_json_file:
+        json.dump(diarization_segments, diarization_json_file, indent=4)
+
+    print("Diarization: writing RTTM")
     # dump the diarization output to disk using RTTM format
     with open(os.path.join(output_directory_path, "diarization.rttm"), "w") as rttm:
         diarization.write_rttm(rttm)

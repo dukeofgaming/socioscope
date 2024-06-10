@@ -25,19 +25,26 @@ def assert_transcription_file_exists(file_path):
 
     assert os.path.exists(transcription_file_path)
 
-def assert_diarization_file_exists(file_path):
+def assert_diarization_files_exist(file_path):
     output_directory_path   = transcription.get_output_directory_path(file_path)
-    diarization_file_path   = os.path.join(
+    
+    diarization_rttm_file_path   = os.path.join(
         output_directory_path,
         "diarization.rttm"
     )
 
-    assert os.path.exists(diarization_file_path)
+    diarization_json_file_path   = os.path.join(
+        output_directory_path,
+        "diarization.json"
+    )
+
+    assert os.path.exists(diarization_rttm_file_path)
+    assert os.path.exists(diarization_json_file_path)
 
 def assert_output_directory_contents_exist(file_path):
     assert_source_wav_exists(file_path)
     assert_transcription_file_exists(file_path)
-    assert_diarization_file_exists(file_path)
+    assert_diarization_files_exist(file_path)
 
 # Functional test to do transcription on a wav file
 # TODO: Decoulpe from CLI implementation or go BDD?
@@ -67,12 +74,12 @@ def test_functional_transcribe_mp3_file():
     #Arrange
     original_audio_file_path    = sys.argv[2]
     remove_output_dir_if_exists(original_audio_file_path)
+    assert original_audio_file_path.endswith(".mp3")
 
     #Act
     cli.main()
 
     #Assert
-    assert original_audio_file_path.endswith(".mp3")
     assert_source_wav_exists(original_audio_file_path)
     assert_output_directory_contents_exist(original_audio_file_path)
 
@@ -93,7 +100,7 @@ def test_functional_diarization():
     assert_source_wav_exists(original_audio_file_path)
 
     #Assert
-    assert_diarization_file_exists(original_audio_file_path)
+    assert_diarization_files_exist(original_audio_file_path)
 
     # assert that the diarization file is not empty
     with open(diarization_file_path) as diarization_file:
