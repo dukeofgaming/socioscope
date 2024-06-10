@@ -17,13 +17,19 @@ def assert_source_wav_exists(file_path):
         transcription.get_source_wav_path(file_path)
     )
 
-def assert_transcription_file_exists(file_path):
-    transcription_file_path = os.path.join(
+def assert_transcription_files_exist(file_path):
+    transcription_srt_file_path = os.path.join(
         transcription.get_output_directory_path(file_path),
         "transcription.srt"
     )
 
-    assert os.path.exists(transcription_file_path)
+    transcription_json_file_path = os.path.join(
+        transcription.get_output_directory_path(file_path),
+        "transcription.json"
+    )
+
+    assert os.path.exists(transcription_srt_file_path)
+    assert os.path.exists(transcription_json_file_path)
 
 def assert_diarization_files_exist(file_path):
     output_directory_path   = transcription.get_output_directory_path(file_path)
@@ -43,7 +49,7 @@ def assert_diarization_files_exist(file_path):
 
 def assert_output_directory_contents_exist(file_path):
     assert_source_wav_exists(file_path)
-    assert_transcription_file_exists(file_path)
+    assert_transcription_files_exist(file_path)
     assert_diarization_files_exist(file_path)
 
 # Functional test to do transcription on a wav file
