@@ -66,6 +66,13 @@ def transcribe_audio(file_path):
 
     print(f"Transcription complete. Output written to {output_directory_path}/diarized_transcription.json")
 
+    print(f"Converting diarized transcription to SRT for {file_path}...")
+    convert_diarized_json_to_srt(
+        os.path.join(output_directory_path, "diarized_transcription.json"),
+        os.path.join(output_directory_path, "diarized_transcription.srt")
+    )
+    print(f"Conversion complete. Output written to {output_directory_path}/diarized_transcription.srt")
+
 
 def run_whisper(file_path, output_directory_path):
 
@@ -226,3 +233,27 @@ def merge_diarization_transcription(diarization_json, transcription_json, output
     # Write the merged data to a new JSON file
     with open(output_file, 'w') as f:
         json.dump(merged_segments, f, indent=4)
+
+
+def convert_diarized_json_to_srt(input_file, output_file):
+    with open(input_file, 'r') as f:
+        data = json.load(f)
+    
+    srt_output = []
+    
+    for index, segment in enumerate(data):
+        start_timestamp  = segment['timestamps']['from']
+        end_timestamp    = segment['timestamps']['to']
+        text = segment['text']
+        
+        # Collect unique speakers
+        unique_speakers = {d["speaker"] for d in segment["diarization"]}
+        speakers = ", ".join(sorted(unique_speakers))  # Sorting to ensure consistent order
+        
+        srt_output.append(f"{index + 1}")
+        srt_output.append(f"{start_timestamp} --> {end_timestamp}")
+        srt_output.append(f"[{speakers}] {text}")
+        srt_output.append("")  # Blank line to separate SRT entries
+
+    with open(output_file, 'w') as f:
+        f.write("\n".join(srt_output))
