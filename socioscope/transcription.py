@@ -9,6 +9,23 @@ from socioscope import messages
 
 supported_audio_formats = (".wav", ".m4a", ".mp3")
 
+def get_output_directory_path(file_path):
+    return os.path.join(
+        os.path.dirname(file_path),
+        os.path.basename(file_path).split('.')[0]
+    )
+
+def get_source_wav_path(file_path):
+    file_extension = os.path.splitext(file_path)[1]
+
+    if file_extension.endswith(".wav"):
+        return file_path
+
+    return os.path.join(
+        get_output_directory_path(file_path),
+        "converted.wav"
+    )
+
 def transcribe_audio(file_path):
     file_name                   = os.path.basename(file_path)
     file_extension              = os.path.splitext(file_path)[1]
@@ -35,19 +52,19 @@ def transcribe_audio(file_path):
     run_whisper(file_path, output_directory_path)
     
     print(f"Diarizing {file_path}...")
-    diarization(output_directory_path)
+    diarization(file_path)
 
 
 def run_whisper(file_path, output_directory_path):
     file_extension              = os.path.splitext(file_path)[1]
+
+    #TODO: Refactor to actually use below
     output_file_path            = os.path.join(output_directory_path, "transcription.srt")
 
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--threads', '16',      # TODO: Parametrize, but default to max available
-        # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-large-v3.bin',     # Model file path
         '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
-        # '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-medium.en.bin',     # Model file path
         '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
         '--output-file', f"{output_directory_path}/transcription",      # Output file path
         # '--output-csv'                                                  # Output format
@@ -72,10 +89,12 @@ def convert_to_wav(file_path, output_directory_path):
 
     print(f"Conversion complete. Output written to {output_file_path}")
 
-def diarization(output_directory_path):
+def diarization(file_path):
 
     with open('config.yaml', 'r') as config_file:
         config = yaml.safe_load(config_file)
+
+    output_directory_path = get_output_directory_path(file_path)
 
     huggingface_token = config['huggingface_token']
 
@@ -89,9 +108,10 @@ def diarization(output_directory_path):
     print("Diarizing: sending pipeline to GPU")
     pipeline.to(torch.device("mps"))
 
+
     print("Diarizing: running pipeline")
     diarization = pipeline(
-        os.path.join(output_directory_path, "converted.wav")
+        get_source_wav_path(file_path)
     )
     # print the result
     for turn, _, speaker in diarization.itertracks(yield_label=True):
