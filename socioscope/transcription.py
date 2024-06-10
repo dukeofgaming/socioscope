@@ -1,3 +1,4 @@
+from datetime import timedelta
 import json
 import os
 import subprocess
@@ -125,11 +126,23 @@ def diarization(file_path):
     diarization_segments = []
     
     for turn, _, speaker in diarization.itertracks(yield_label=True):
-        print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
+        start_milliseconds  = convert_to_milliseconds(turn.start)
+        end_milliseconds    = convert_to_milliseconds(turn.end)
+        start_timestamp     = convert_to_timestamp(turn.start)
+        end_timestamp       = convert_to_timestamp(turn.end)
+        
+        print(f"start={start_timestamp} stop={end_timestamp} speaker_{speaker}")
+        
         diarization_segments.append({
-            "start": turn.start,
-            "end": turn.end,
-            "speaker": speaker
+            "timestamps": {
+                "from"  : start_timestamp,
+                "to"    : end_timestamp
+            },
+            "offsets": {
+                "from"  : start_milliseconds,
+                "to"    : end_milliseconds
+            },
+            "speaker"   : speaker
         })
 
     with open(os.path.join(output_directory_path,"diarization.json"),"w") as diarization_json_file:
@@ -139,3 +152,22 @@ def diarization(file_path):
     # dump the diarization output to disk using RTTM format
     with open(os.path.join(output_directory_path, "diarization.rttm"), "w") as rttm:
         diarization.write_rttm(rttm)
+
+def convert_to_milliseconds(time_in_seconds):
+    return int(time_in_seconds * 1000)
+
+# Function to convert seconds to the timestamp format "HH:MM:SS,mmm"
+def convert_to_timestamp(time_in_seconds):
+    td = timedelta(seconds=time_in_seconds)
+    millis = int(td.total_seconds() * 1000) % 1000
+    timestamp = str(td)
+    # Handling days in timedelta conversion
+    if td.days > 0:
+        days, time = str(td).split(", ")
+        hours, minutes, seconds = time.split(":")
+        hours = int(hours) + (24 * int(days.split(" ")[0]))
+        timestamp = f"{hours:02}:{minutes}:{seconds}"
+    else:
+        hours, minutes, seconds = str(td).split(":")
+        timestamp = f"{int(hours):02}:{int(minutes):02}:{float(seconds):06.3f}".replace('.', ',')
+    return timestamp
