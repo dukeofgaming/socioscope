@@ -1,1 +1,4 @@
 huggingface_token: "<huggingface token used for downloading diarization model>"
+
+transcription:
+  model: "<absolute path to the diarization model>"

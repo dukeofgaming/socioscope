@@ -56,6 +56,12 @@ def transcribe_audio(file_path):
 
 
 def run_whisper(file_path, output_directory_path):
+
+    # TODO: Load config from script from the script directory so that there
+    #       is a separate config for tests 
+    with open('config.yaml', 'r') as config_file:
+        config = yaml.safe_load(config_file)
+
     file_extension              = os.path.splitext(file_path)[1]
 
     #TODO: Refactor to actually use below
@@ -64,7 +70,7 @@ def run_whisper(file_path, output_directory_path):
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--threads', '16',      # TODO: Parametrize, but default to max available
-        '--model', '/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
+        '--model', config['transcription']['model'],   #'/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
         '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
         '--output-file', f"{output_directory_path}/transcription",      # Output file path
         # '--output-csv'                                                  # Output format
