@@ -177,6 +177,9 @@ pyrightconfig.json
 
 
 ### Socioscope
+#Ignore local development config files
+config.yaml
+
 #Test models & data
 tests/.models/*
 tests/data/*.txt
@@ -185,6 +188,7 @@ tests/data/*.csv
 tests/data/recordings/
 tests/data/fdr/
 tests/data/jfk/
+tests/data/jfk-rmn/
 
 #DS_store
 .DS_store
