@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 
+import pandas as pd
 import torch
 import yaml
 from pyannote.audio import Pipeline
@@ -55,6 +56,15 @@ def transcribe_audio(file_path):
     
     print(f"Diarizing {file_path}...")
     diarization(file_path)
+
+    print(f"Merging diarization and transcription for {file_path}...")
+    merge_diarization_transcription(
+        os.path.join(output_directory_path, "diarization.json"),
+        os.path.join(output_directory_path, "transcription.json"),
+        os.path.join(output_directory_path, "diarized_transcription.json")
+    )
+
+    print(f"Transcription complete. Output written to {output_directory_path}/diarized_transcription.json")
 
 
 def run_whisper(file_path, output_directory_path):
@@ -171,3 +181,48 @@ def convert_to_timestamp(time_in_seconds):
         hours, minutes, seconds = str(td).split(":")
         timestamp = f"{int(hours):02}:{int(minutes):02}:{float(seconds):06.3f}".replace('.', ',')
     return timestamp
+
+def merge_diarization_transcription(diarization_json, transcription_json, output_file):
+    with open(diarization_json, 'r') as f:
+        diarization_data = json.load(f)
+    
+    with open(transcription_json, 'r') as f:
+        transcription_data = json.load(f)["transcription"]
+    
+    merged_segments = []
+
+    for t_segment in transcription_data:
+        t_start = t_segment['offsets']['from']
+        t_end = t_segment['offsets']['to']
+        t_text = t_segment['text']
+        t_timestamps = t_segment['timestamps']
+        
+        # Find relevant diarization segments
+        relevant_diarizations = [
+            {
+                "timestamps": {
+                    "from": d["timestamps"]["from"],
+                    "to": d["timestamps"]["to"]
+                },
+                "offsets": {
+                    "from": d["offsets"]["from"],
+                    "to": d["offsets"]["to"]
+                },
+                "speaker": d["speaker"]
+            }
+            for d in diarization_data if d["offsets"]["from"] < t_end and d["offsets"]["to"] > t_start
+        ]
+        
+        merged_segments.append({
+            "timestamps": t_timestamps,
+            "offsets": {
+                "from": t_start,
+                "to": t_end
+            },
+            "text": t_text,
+            "diarization": relevant_diarizations
+        })
+    
+    # Write the merged data to a new JSON file
+    with open(output_file, 'w') as f:
+        json.dump(merged_segments, f, indent=4)
