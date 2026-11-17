@@ -36,8 +36,11 @@ impl WhisperEngine {
         wav_path: &Path,
     ) -> Result<Vec<TranscriptSegment>, Error> {
         if self.model_path.as_deref() != Some(model_path) {
-            let params = WhisperContextParameters::default();
-            let context = WhisperContext::new_with_params(model_path, params)
+            // Match whisper-cli on this Mac: GPU on, flash attention on.
+            let mut context_params = WhisperContextParameters::default();
+            context_params.use_gpu = true;
+            context_params.flash_attn = true;
+            let context = WhisperContext::new_with_params(model_path, context_params)
                 .map_err(|error| Error::new(error.to_string()))?;
             self.context = Some(context);
             self.model_path = Some(model_path.to_string());
@@ -50,8 +53,13 @@ impl WhisperEngine {
             .create_state()
             .map_err(|error| Error::new(error.to_string()))?;
         let samples = load_mono_f32(wav_path, WHISPER_SAMPLE_RATE)?;
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        // whisper-cli defaults: beam size 5 (which selects beam search) and best-of 5.
+        let mut params = FullParams::new(SamplingStrategy::BeamSearch {
+            beam_size: 5,
+            patience: -1.0,
+        });
         params.set_n_threads(THREADS);
+        params.set_language(Some("en"));
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
