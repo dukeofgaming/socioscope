@@ -1,4 +1,11 @@
 huggingface_token: "<huggingface token used for downloading diarization model>"
 
 transcription:
-  model: "<absolute path to the diarization model>"
+  model: "<absolute path to the ggml whisper model>"
+
+# Used by the Rust CLI. The Python CLI ignores these keys.
+diarization:
+  segmentation_model: "<path to sherpa pyannote segmentation-3.0 model.onnx>"
+  embedding_model: "<path to the speaker embedding onnx model>"
+  num_clusters: -1
+  threshold: 0.5
