@@ -1,0 +1,16 @@
+[package]
+name = "socioscope-web"
+version = "0.1.0"
+edition = "2021"
+description = "Local web UI for the socioscope CLI. Distributed separately from the CLI."
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+socioscope = { path = "../socioscope" }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
