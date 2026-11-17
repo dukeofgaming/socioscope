@@ -1,19 +1,20 @@
 ## Requirements
 
-- Python 3.10.14
+- Rust
+- ffmpeg
+- A ggml whisper model and the sherpa diarization models in `config.tpl.yaml`
 
-
-
-## Running the application
-
-1. Activate the virtual environment:
+## Running
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+cp config.tpl.yaml config.yaml
+cargo run --manifest-path rust/socioscope/Cargo.toml --release -- transcribe <file|directory>
 ```
+
+## Specs
+
+Cucumber specs are grouped by command under `rust/socioscope/specs`.
 
 ```bash
-python -m socioscope transcribe <file|directory>
+cargo test --manifest-path rust/socioscope/Cargo.toml
 ```
-
