@@ -63,6 +63,8 @@ async fn the_shell_is_a_responsive_app() {
     assert!(html.contains("viewport-fit=cover"), "{html}");
     assert!(html.contains("Open Knowledge Format"), "{html}");
     assert!(html.contains("/record"), "{html}");
+    assert!(html.contains("id=\"theme\""), "{html}");
+    assert!(html.contains("Switch to dark mode"), "{html}");
     assert!(html.contains("max-w-lg grid-cols-3") || html.contains("grid-cols-3"), "{html}");
 
     let fragment = app

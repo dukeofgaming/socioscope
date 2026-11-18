@@ -636,7 +636,7 @@ async fn icon() -> Response {
 async fn manifest() -> Response {
     (
         [(header::CONTENT_TYPE, "application/manifest+json")],
-        r##"{"name":"socioscope","short_name":"socioscope","display":"standalone","start_url":"/","background_color":"#12110e","theme_color":"#12110e","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}"##,
+        r##"{"name":"socioscope","short_name":"socioscope","display":"standalone","start_url":"/","background_color":"#f4efe6","theme_color":"#f4efe6","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]}"##,
     )
         .into_response()
 }

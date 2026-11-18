@@ -1,9 +1,20 @@
 (function () {
+  if (window.socioscopeTheme) {
+    window.socioscopeTheme(document.documentElement.classList.contains("dark") ? "dark" : "light", false);
+    if (window.matchMedia) {
+      matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (event) {
+        var choice = null;
+        try { choice = localStorage.getItem("socioscope-theme"); } catch (e) {}
+        if (!choice) window.socioscopeTheme(event.matches ? "dark" : "light", false);
+      });
+    }
+  }
+
   var theme = document.getElementById("theme");
   if (theme) {
     theme.addEventListener("click", function () {
-      var dark = document.documentElement.classList.toggle("dark");
-      localStorage.setItem("socioscope-theme", dark ? "dark" : "light");
+      var dark = !document.documentElement.classList.contains("dark");
+      window.socioscopeTheme(dark ? "dark" : "light", true);
     });
   }
 

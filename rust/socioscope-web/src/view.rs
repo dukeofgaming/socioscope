@@ -31,18 +31,34 @@ pub fn document(shell: &Shell) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#f4efe6" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#12110e" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4efe6">
 <title>{title}</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/app.css">
 <script>
-(function () {{
-  var saved = localStorage.getItem("socioscope-theme");
-  if (saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches)) {{
-    document.documentElement.classList.add("dark");
+window.socioscopeTheme = function (mode, persist) {{
+  var dark = mode === "dark";
+  document.documentElement.classList.toggle("dark", dark);
+  if (persist) {{
+    try {{ localStorage.setItem("socioscope-theme", mode); }} catch (e) {{}}
   }}
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#12110e" : "#f4efe6");
+  var btn = document.getElementById("theme");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", dark ? "true" : "false");
+  btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+  var label = document.getElementById("theme-label");
+  if (label) label.textContent = dark ? "Light" : "Dark";
+}};
+(function () {{
+  var saved = null;
+  try {{ saved = localStorage.getItem("socioscope-theme"); }} catch (e) {{}}
+  var dark = saved === "dark" || (saved !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", dark ? "#12110e" : "#f4efe6");
 }})();
 </script>
 <script src="/htmx.min.js"></script>
@@ -56,8 +72,12 @@ pub fn document(shell: &Shell) -> String {
 <span class="hidden text-[11px] uppercase tracking-[0.18em] text-muted min-[420px]:inline">field notes</span>
 </a>
 <div class="ml-auto flex items-center gap-2">
-<a href="/record" class="hidden rounded-full bg-copper px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 sm:inline">Record</a>
-<button type="button" id="theme" class="rounded-full border border-line px-3 py-1.5 text-sm text-muted" aria-label="Switch color theme">Theme</button>
+<a href="/record" class="hidden rounded-full bg-copper px-3 py-1.5 text-sm font-medium text-on-copper hover:opacity-90 sm:inline">Record</a>
+<button type="button" id="theme" class="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1.5 text-sm text-muted" aria-pressed="false" aria-label="Switch to dark mode">
+<span class="theme-moon" aria-hidden="true"><svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 14.5A7.5 7.5 0 0 1 9.5 4 6.5 6.5 0 1 0 20 14.5z"/></svg></span>
+<span class="theme-sun" aria-hidden="true"><svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.5"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg></span>
+<span id="theme-label" class="hidden min-[420px]:inline">Dark</span>
+</button>
 </div>
 </header>
 <aside id="library" class="{library_class} border-line lg:border-r">{library}</aside>
@@ -140,7 +160,7 @@ pub fn home_stage(full_tape: bool) -> String {
 <h1 class="font-serif text-4xl leading-none tracking-tight sm:text-5xl">Keep the take.</h1>
 <p class="max-w-md text-sm leading-relaxed text-muted sm:text-base">Record from the debate tape, or open an audio file. Each session is stored as an OKF package: the original audio, the transcript, and the notes around them.</p>
 <div class="flex flex-wrap items-center gap-3">
-<a href="/record" class="rounded-full bg-copper px-4 py-2 text-sm font-medium text-white">Record</a>
+<a href="/record" class="rounded-full bg-copper px-4 py-2 text-sm font-medium text-on-copper">Record</a>
 {open}
 </div>
 {path}

@@ -10,18 +10,20 @@
   --line: #e3d8c8;
   --panel: #fffaf3;
   --copper: #b8432f;
+  --on-copper: #fffaf3;
   --moss: #21573c;
   color-scheme: light;
 }
 
 .dark {
   --paper: #12110e;
-  --ink: #f3ecdf;
-  --muted: #b7ab9c;
-  --line: #322c25;
-  --panel: #1c1915;
-  --copper: #e07a68;
-  --moss: #8fbfa4;
+  --ink: #f4efe6;
+  --muted: #c4b7a6;
+  --line: #3d362e;
+  --panel: #221e1a;
+  --copper: #e7a090;
+  --on-copper: #2a1210;
+  --moss: #9dceb4;
   color-scheme: dark;
 }
 
@@ -34,6 +36,7 @@
   --color-line: var(--line);
   --color-panel: var(--panel);
   --color-copper: var(--copper);
+  --color-on-copper: var(--on-copper);
   --color-moss: var(--moss);
 }
 
@@ -132,15 +135,15 @@
   width: 5.5rem;
   height: 5.5rem;
   border-radius: 999px;
-  background: #b8432f;
-  color: white;
+  background: var(--copper);
+  color: var(--on-copper);
   display: grid;
   place-items: center;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 0.68rem;
-  box-shadow: 0 0 0 8px color-mix(in srgb, #b8432f 16%, transparent);
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--copper) 22%, transparent);
 }
 .record-btn:focus-visible {
   outline: 2px solid var(--ink);
@@ -150,9 +153,13 @@
   animation: pulse-ring 1.6s ease-out infinite;
 }
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, #b8432f 50%, transparent); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--copper) 55%, transparent); }
   100% { box-shadow: 0 0 0 18px transparent; }
 }
+
+.theme-icon { width: 1rem; height: 1rem; display: block; }
+html:not(.dark) .theme-sun { display: none; }
+.dark .theme-moon { display: none; }
 
 .meter {
   display: flex;
