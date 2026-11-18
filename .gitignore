@@ -192,3 +192,6 @@ tests/data/jfk-rmn/
 
 #DS_store
 .DS_store
+
+socioscope-data/
+rust/socioscope-web/node_modules/

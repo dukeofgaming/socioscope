@@ -1,11 +1,45 @@
-use std::sync::{mpsc, Mutex};
+use std::io::Cursor;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use hound::{SampleFormat, WavSpec, WavWriter};
 use http_body_util::BodyExt;
-use socioscope_web::{router_with, Outcome};
+use socioscope_web::{router_from, AppConfig, FixedAnalyze};
 use tower::ServiceExt;
+
+fn wav(samples: usize) -> Vec<u8> {
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: 16_000,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut writer = WavWriter::new(&mut cursor, spec).unwrap();
+        for index in 0..samples {
+            let sample = ((index as f32 / 40.0).sin() * 8000.0) as i16;
+            writer.write_sample(sample).unwrap();
+        }
+        writer.finalize().unwrap();
+    }
+    cursor.into_inner()
+}
+
+fn app(dir: PathBuf) -> axum::Router {
+    router_from(AppConfig {
+        data_dir: dir,
+        pace: 40.0,
+        opening_wav: wav(8_000),
+        opening_srt: "1\n00:00:00,000 --> 00:00:00,250\n[Ada Lovelace] hello from the tape\n\n2\n00:00:00,250 --> 00:00:00,500\n[Alan Turing] and another voice\n\n".into(),
+        full_tape: None,
+        analyzer: Box::new(FixedAnalyze {
+            srt: "1\n00:00:00,000 --> 00:00:01,000\n[Grace Hopper] opened line\n\n".into(),
+        }),
+    })
+}
 
 async fn body(response: axum::response::Response) -> String {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
@@ -13,13 +47,10 @@ async fn body(response: axum::response::Response) -> String {
 }
 
 #[tokio::test]
-async fn index_and_htmx_are_static() {
-    let app = router_with(|_path| Outcome {
-        code: 0,
-        stderr: String::new(),
-        output: String::new(),
-    });
-
+async fn the_shell_is_a_responsive_app() {
+    let dir = std::env::temp_dir().join(format!("socioscope-ui-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let app = app(dir);
     let page = app
         .clone()
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -27,116 +58,232 @@ async fn index_and_htmx_are_static() {
         .unwrap();
     assert_eq!(page.status(), StatusCode::OK);
     let html = body(page).await;
-    assert!(html.contains(r#"hx-post="/jobs""#), "{html}");
-    assert!(html.contains(r#"src="/htmx.min.js""#), "{html}");
+    assert!(html.contains("socioscope"), "{html}");
+    assert!(html.contains("Keep the take."), "{html}");
+    assert!(html.contains("viewport-fit=cover"), "{html}");
+    assert!(html.contains("Open Knowledge Format"), "{html}");
+    assert!(html.contains("/record"), "{html}");
+    assert!(html.contains("max-w-lg grid-cols-3") || html.contains("grid-cols-3"), "{html}");
 
-    let script = app
-        .clone()
+    let fragment = app
         .oneshot(
             Request::builder()
-                .uri("/htmx.min.js")
+                .uri("/record")
+                .header("hx-request", "true")
+                .header("hx-target", "stage")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(script.status(), StatusCode::OK);
-    let script_body = body(script).await;
-    assert!(script_body.contains("htmx"));
+    assert_eq!(fragment.status(), StatusCode::OK);
+    let partial = body(fragment).await;
+    assert!(partial.contains("The debate, at 1×."), "{partial}");
+    assert!(!partial.contains("<html"), "stage swaps must stay fragments:\n{partial}");
 }
 
 #[tokio::test]
-async fn a_blank_path_is_rejected_without_a_job() {
-    let app = router_with(|_path| panic!("transcriber should not run"));
-    let response = app
+async fn a_recording_becomes_an_okf_package() {
+    let dir = std::env::temp_dir().join(format!("socioscope-rec-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let app = app(dir.clone());
+
+    let started = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/jobs")
+                .uri("/recordings")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("file=%20"))
+                .body(Body::from("source=opening"))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = body(response).await;
-    assert!(html.contains("Enter a file or directory."), "{html}");
+    let location = started
+        .headers()
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let started_html = if started.status() == StatusCode::SEE_OTHER {
+        String::new()
+    } else {
+        assert_eq!(started.status(), StatusCode::OK);
+        body(started).await
+    };
+
+    let id = if let Some(id) = location.strip_prefix("/bundles/") {
+        id.to_string()
+    } else {
+        let marker = "/recordings/";
+        let start = started_html.find(marker).expect(&started_html) + marker.len();
+        let end = started_html[start..]
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_')
+            .map(|offset| start + offset)
+            .unwrap_or(started_html.len());
+        let id = started_html[start..end].to_string();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut found = String::new();
+        while Instant::now() < deadline {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/recordings/{id}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            if response.status() == StatusCode::SEE_OTHER {
+                found = response
+                    .headers()
+                    .get("location")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(found.ends_with(&id), "{found}");
+        id
+    };
+
+    let bundle = dir.join("bundles").join(&id);
+    let index = std::fs::read_to_string(bundle.join("index.md")).unwrap();
+    assert!(index.starts_with("---\nokf_version: \"0.2\"\n---"), "{index}");
+    let session = std::fs::read_to_string(bundle.join("session.md")).unwrap();
+    assert!(session.contains("type: Recording Session"), "{session}");
+    assert!(session.contains("capture: emulated"), "{session}");
+    let transcript = std::fs::read_to_string(bundle.join("transcript.md")).unwrap();
+    assert!(transcript.contains("type: Diarized Transcript"), "{transcript}");
+    assert!(transcript.contains("hello from the tape"), "{transcript}");
+    assert!(transcript.contains("and another voice"), "{transcript}");
+    let wav = std::fs::read(bundle.join("references").join("recording.wav")).unwrap();
+    assert!(wav.starts_with(b"RIFF"), "original take was not stored");
+    let log = std::fs::read_to_string(bundle.join("log.md")).unwrap();
+    assert!(log.contains("**Creation**"), "{log}");
+    assert!(log.contains("**Update**"), "{log}");
+    for note in ["index.md", "log.md"] {
+        let text = std::fs::read_to_string(bundle.join(note)).unwrap();
+        if note == "log.md" {
+            assert!(!text.starts_with("---"), "{note}");
+        }
+    }
+    let speaker = std::fs::read_to_string(
+        bundle
+            .join("speakers")
+            .join("ada-lovelace.md"),
+    )
+    .unwrap();
+    assert!(speaker.contains("type: Speaker"), "{speaker}");
+
+    let concept = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/bundles/{id}/concepts/session.md"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let concept_html = body(concept).await;
+    assert!(concept_html.contains("Recording Session"), "{concept_html}");
+    assert!(concept_html.contains("OKF source"), "{concept_html}");
+
+    let escaped = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/bundles/{id}/concepts/../../secret.md"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(escaped.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn a_job_polls_until_the_transcript_is_ready() {
-    let (release_tx, release_rx) = mpsc::channel();
-    let release_rx = Mutex::new(release_rx);
-    let app = router_with(move |path| {
-        let _ = release_rx.lock().unwrap().recv();
-        Outcome {
-            code: 0,
-            stderr: String::new(),
-            output: format!("srt for {path}"),
-        }
-    });
+async fn an_opened_file_is_stored_and_analyzed() {
+    let dir = std::env::temp_dir().join(format!("socioscope-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("outside.wav");
+    std::fs::write(&source, wav(1600)).unwrap();
+    let app = app(dir.clone());
 
     let created = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/jobs")
+                .uri("/imports/path")
                 .header("content-type", "application/x-www-form-urlencoded")
-                .body(Body::from("file=/tmp/sample.wav"))
+                .body(Body::from(format!("path={}", source.display())))
                 .unwrap(),
         )
         .await
         .unwrap();
-    let created_html = body(created).await;
-    assert!(
-        created_html.contains(r#"hx-get="/jobs/1""#),
-        "{created_html}"
-    );
-    assert!(created_html.contains("/tmp/sample.wav"), "{created_html}");
+    assert_eq!(created.status(), StatusCode::OK);
+    let html = body(created).await;
+    assert!(html.contains("outside") || html.contains("Opened"), "{html}");
 
-    release_tx.send(()).unwrap();
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut finished = String::new();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut transcript = String::new();
     while Instant::now() < deadline {
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/jobs/1")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        finished = body(response).await;
-        if finished.contains("srt for /tmp/sample.wav") {
-            break;
+        if let Some(bundle) = std::fs::read_dir(dir.join("bundles"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .next()
+        {
+            let path = bundle.join("transcript.md");
+            if path.is_file() {
+                transcript = std::fs::read_to_string(&path).unwrap();
+                if transcript.contains("opened line") {
+                    let original = std::fs::read(bundle.join("references").join("original.wav")).unwrap();
+                    assert_eq!(original, wav(1600));
+                    let session = std::fs::read_to_string(bundle.join("session.md")).unwrap();
+                    assert!(session.contains("capture: opened"), "{session}");
+                    assert!(session.contains("analysis: done"), "{session}");
+                    break;
+                }
+            }
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(finished.contains("Finished"), "{finished}");
-    assert!(finished.contains("srt for /tmp/sample.wav"), "{finished}");
-    assert!(!finished.contains("hx-get"), "{finished}");
+    assert!(transcript.contains("opened line"), "{transcript}");
+    assert!(transcript.contains("type: Diarized Transcript"), "{transcript}");
 }
 
 #[tokio::test]
-async fn an_unknown_job_is_not_found() {
-    let app = router_with(|_path| Outcome {
-        code: 0,
-        stderr: String::new(),
-        output: String::new(),
-    });
+async fn a_text_file_is_rejected() {
+    let dir = std::env::temp_dir().join(format!("socioscope-bad-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("notes.txt");
+    std::fs::write(&source, b"hello").unwrap();
+    let app = app(dir.clone());
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/jobs/9")
-                .body(Body::empty())
+                .method("POST")
+                .uri("/imports/path")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(format!("path={}", source.display())))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let html = body(response).await;
+    assert!(
+        html.contains("The file must be an audio file: .wav, .m4a, .mp3"),
+        "{html}"
+    );
+    assert!(!dir.join("bundles").exists() || std::fs::read_dir(dir.join("bundles")).unwrap().next().is_none());
 }

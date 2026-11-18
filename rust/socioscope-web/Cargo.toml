@@ -6,7 +6,8 @@ description = "Local web UI for the socioscope CLI. Distributed separately from 
 license = "MIT"
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
+hound = "3.5"
 serde = { version = "1", features = ["derive"] }
 socioscope = { path = "../socioscope" }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
