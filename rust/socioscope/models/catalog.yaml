@@ -1,0 +1,269 @@
+note: "A shelf for an M3 Max with 48 GB, keeping each model inside about 24 GB. Nothing here is close to that ceiling. QVAC is not the downloader: its SDK runs Whisper, Parakeet, and Nemotron, and it does not run Desert Ant Voz, Desert Ant Who, or Cactus Whistle."
+models:
+  - id: "cactus-whistle"
+    name: "Whistle"
+    role: "transcription"
+    badge: "Smallest"
+    runtime: "Cactus Needle"
+    summary: "Cactus Needle's speech model. 16.9 MB, seven languages, word timestamps, and a 30 second window on the same engine as Needle. This build can download it and cannot transcribe with it yet."
+    license: "see the Cactus-Compute/whistle model card"
+    released: "2026"
+    runnable: false
+    files:
+    - url: "https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact"
+      filename: "whistle.cact"
+      bytes: 16919407
+      slot: "weights"
+      sha256: "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb"
+  - id: "whisper-tiny-en"
+    name: "Whisper tiny, English"
+    role: "transcription"
+    badge: "Fast"
+    runtime: "whisper.cpp"
+    summary: "The smallest Whisper this app can run. English only, about 74 MB, and quick enough to keep loaded."
+    license: "MIT"
+    released: "2022"
+    runnable: true
+    files:
+    - url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin"
+      filename: "ggml-tiny.en.bin"
+      bytes: 77704715
+      slot: "weights"
+  - id: "whisper-large-v3-turbo-q8"
+    name: "Whisper large-v3-turbo, Q8"
+    role: "transcription"
+    badge: "Best here"
+    runtime: "whisper.cpp"
+    summary: "The best transcription this build can run. Turbo quality at 834 MB, which sits easily inside the 24 GB you can spare on an M3 Max. Metal is used when the CLI was built on macOS."
+    license: "MIT"
+    released: "2024"
+    runnable: true
+    files:
+    - url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin"
+      filename: "ggml-large-v3-turbo-q8_0.bin"
+      bytes: 874188075
+      slot: "weights"
+      sha256: "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5be24e259a1"
+  - id: "desertant-voz"
+    name: "Voz"
+    role: "transcription"
+    badge: "Neural Engine"
+    runtime: "Desert Ant"
+    summary: "Desert Ant's on-device transcription. Parakeet TDT 0.6B v3, converted for the Apple Neural Engine, with word timestamps in 25 languages. The Core ML graphs are 326 MB. This build stores them and does not run them yet."
+    license: "CC-BY-4.0"
+    released: "2026"
+    runnable: false
+    files:
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/analytics/coremldata.bin"
+      filename: "decoder.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/coremldata.bin"
+      filename: "decoder.mlmodelc/coremldata.bin"
+      bytes: 1093
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/metadata.json"
+      filename: "decoder.mlmodelc/metadata.json"
+      bytes: 18528
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/model.mil"
+      filename: "decoder.mlmodelc/model.mil"
+      bytes: 99410
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/weights/weight.bin"
+      filename: "decoder.mlmodelc/weights/weight.bin"
+      bytes: 12277132
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/encoder.mlmodelc/analytics/coremldata.bin"
+      filename: "encoder.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/encoder.mlmodelc/coremldata.bin"
+      filename: "encoder.mlmodelc/coremldata.bin"
+      bytes: 430
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/encoder.mlmodelc/metadata.json"
+      filename: "encoder.mlmodelc/metadata.json"
+      bytes: 2739
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/encoder.mlmodelc/model.mil"
+      filename: "encoder.mlmodelc/model.mil"
+      bytes: 820490
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/encoder.mlmodelc/weights/weight.bin"
+      filename: "encoder.mlmodelc/weights/weight.bin"
+      bytes: 312039808
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/mel.mlmodelc/analytics/coremldata.bin"
+      filename: "mel.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/mel.mlmodelc/coremldata.bin"
+      filename: "mel.mlmodelc/coremldata.bin"
+      bytes: 405
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/mel.mlmodelc/metadata.json"
+      filename: "mel.mlmodelc/metadata.json"
+      bytes: 2215
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/mel.mlmodelc/model.mil"
+      filename: "mel.mlmodelc/model.mil"
+      bytes: 9728
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/mel.mlmodelc/weights/weight.bin"
+      filename: "mel.mlmodelc/weights/weight.bin"
+      bytes: 826688
+      slot: "weights"
+  - id: "parakeet-tdt-v3-q8"
+    name: "Parakeet TDT 0.6B v3, Q8"
+    role: "transcription"
+    badge: "Recent"
+    runtime: "parakeet.cpp"
+    summary: "The same NVIDIA family as Voz, in one 643 MB GGUF. A community conversion of the official checkpoint. This build can download it and cannot transcribe with it yet."
+    license: "CC-BY-4.0"
+    released: "2025"
+    runnable: false
+    files:
+    - url: "https://huggingface.co/cstr/parakeet-tdt-0.6b-v3-GGUF/resolve/main/parakeet-tdt-0.6b-v3-q8_0.gguf"
+      filename: "parakeet-tdt-0.6b-v3-q8_0.gguf"
+      bytes: 674342336
+      slot: "weights"
+  - id: "who-coreml-int8"
+    name: "Who"
+    role: "diarization"
+    badge: "Smallest"
+    runtime: "Desert Ant"
+    summary: "Desert Ant's speaker model. 42 MB of 8-bit Core ML, four speakers in each five-minute section, and the same 12.6% AMI error as the larger float16 build. This build stores it and still diarizes with pyannote."
+    license: "see the desert-ant-labs/who model card"
+    released: "2026"
+    runnable: false
+    files:
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_30000.mlmodelc/analytics/coremldata.bin"
+      filename: "coreml-int8/encoder_30000.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_30000.mlmodelc/coremldata.bin"
+      filename: "coreml-int8/encoder_30000.mlmodelc/coremldata.bin"
+      bytes: 399
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_30000.mlmodelc/model.mil"
+      filename: "coreml-int8/encoder_30000.mlmodelc/model.mil"
+      bytes: 244997
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_30000.mlmodelc/weights/weight.bin"
+      filename: "coreml-int8/encoder_30000.mlmodelc/weights/weight.bin"
+      bytes: 11828544
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_6000.mlmodelc/analytics/coremldata.bin"
+      filename: "coreml-int8/encoder_6000.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_6000.mlmodelc/coremldata.bin"
+      filename: "coreml-int8/encoder_6000.mlmodelc/coremldata.bin"
+      bytes: 397
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_6000.mlmodelc/model.mil"
+      filename: "coreml-int8/encoder_6000.mlmodelc/model.mil"
+      bytes: 244294
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_6000.mlmodelc/weights/weight.bin"
+      filename: "coreml-int8/encoder_6000.mlmodelc/weights/weight.bin"
+      bytes: 10557760
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_30000.mlmodelc/analytics/coremldata.bin"
+      filename: "coreml-int8/queries_30000.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_30000.mlmodelc/coremldata.bin"
+      filename: "coreml-int8/queries_30000.mlmodelc/coremldata.bin"
+      bytes: 504
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_30000.mlmodelc/model.mil"
+      filename: "coreml-int8/queries_30000.mlmodelc/model.mil"
+      bytes: 147139
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_30000.mlmodelc/weights/weight.bin"
+      filename: "coreml-int8/queries_30000.mlmodelc/weights/weight.bin"
+      bytes: 6590720
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_6000.mlmodelc/analytics/coremldata.bin"
+      filename: "coreml-int8/queries_6000.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_6000.mlmodelc/coremldata.bin"
+      filename: "coreml-int8/queries_6000.mlmodelc/coremldata.bin"
+      bytes: 452
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_6000.mlmodelc/model.mil"
+      filename: "coreml-int8/queries_6000.mlmodelc/model.mil"
+      bytes: 145340
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/queries_6000.mlmodelc/weights/weight.bin"
+      filename: "coreml-int8/queries_6000.mlmodelc/weights/weight.bin"
+      bytes: 6590720
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/voice_3256.mlmodelc/analytics/coremldata.bin"
+      filename: "coreml-int8/voice_3256.mlmodelc/analytics/coremldata.bin"
+      bytes: 243
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/voice_3256.mlmodelc/coremldata.bin"
+      filename: "coreml-int8/voice_3256.mlmodelc/coremldata.bin"
+      bytes: 373
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/voice_3256.mlmodelc/model.mil"
+      filename: "coreml-int8/voice_3256.mlmodelc/model.mil"
+      bytes: 63604
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/voice_3256.mlmodelc/weights/weight.bin"
+      filename: "coreml-int8/voice_3256.mlmodelc/weights/weight.bin"
+      bytes: 5340864
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/who_embed.f16"
+      filename: "coreml-int8/who_embed.f16"
+      bytes: 2621960
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/who_mel_banks.f32"
+      filename: "coreml-int8/who_mel_banks.f32"
+      bytes: 23652
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/who_meta.json"
+      filename: "coreml-int8/who_meta.json"
+      bytes: 3954
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/who_voice_banks.f32"
+      filename: "coreml-int8/who_voice_banks.f32"
+      bytes: 82248
+      slot: "weights"
+  - id: "pyannote-3dspeaker"
+    name: "pyannote 3.0 and 3D-Speaker"
+    role: "diarization"
+    badge: "Runs here"
+    runtime: "sherpa-onnx"
+    summary: "The diarizer this build actually runs. pyannote segmentation 3.0 finds speech, and the 3D-Speaker embedding clusters voices. About 43 MB together."
+    license: "MIT"
+    released: "2023"
+    runnable: true
+    files:
+    - url: "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx"
+      filename: "segmentation.onnx"
+      bytes: 5992913
+      slot: "segmentation"
+    - url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+      filename: "embedding.onnx"
+      bytes: 39593761
+      slot: "embedding"
+  - id: "nemotron-3-diarization-q8"
+    name: "Nemotron 3 Diarization, Q8"
+    role: "diarization"
+    badge: "Best"
+    runtime: "Nemotron"
+    summary: "NVIDIA's latest diarizer, from September 2026. About 100M parameters and 102 MB at Q8. Up to eight speakers, overlap, and a 10 ms grid. This build can download the official GGUF and cannot run it yet."
+    license: "OpenMDW-1.1"
+    released: "2026-09"
+    runnable: false
+    files:
+    - url: "https://huggingface.co/nvidia/Nemotron-3-Diarization/resolve/main/Nemotron-3-Diarization.q8_0.gguf"
+      filename: "Nemotron-3-Diarization.q8_0.gguf"
+      bytes: 107012128
+      slot: "weights"
+      sha256: "08456d9e22cd9a323c0364d98375f3746d6e68507ebb705cd46438c534c7a3a1"

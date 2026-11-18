@@ -145,7 +145,7 @@ async fn unknown_command(cli: &mut Cli, command: String) {
     assert_eq!(
         cli.stderr,
         format!(
-            "usage: socioscope [-h] {{transcribe}} ...\nsocioscope: error: argument command: invalid choice: '{command}' (choose from 'transcribe')\n"
+            "usage: socioscope [-h] {{transcribe,models}} ...\nsocioscope: error: argument command: invalid choice: '{command}' (choose from 'transcribe', 'models')\n"
         )
     );
 }
