@@ -5,6 +5,7 @@ pub mod diarize;
 pub mod error;
 pub mod json_io;
 pub mod merge;
+pub mod models;
 pub mod messages;
 pub mod paths;
 pub mod srt;

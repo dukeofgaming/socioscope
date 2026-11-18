@@ -29,8 +29,12 @@ fn wav(samples: usize) -> Vec<u8> {
 }
 
 fn app(dir: PathBuf) -> axum::Router {
+    app_bin(dir, PathBuf::from("socioscope"))
+}
+
+fn app_bin(dir: PathBuf, bin: PathBuf) -> axum::Router {
     router_from(AppConfig {
-        data_dir: dir,
+        data_dir: dir.clone(),
         pace: 40.0,
         opening_wav: wav(8_000),
         opening_srt: "1\n00:00:00,000 --> 00:00:00,250\n[Ada Lovelace] hello from the tape\n\n2\n00:00:00,250 --> 00:00:00,500\n[Alan Turing] and another voice\n\n".into(),
@@ -38,6 +42,9 @@ fn app(dir: PathBuf) -> axum::Router {
         analyzer: Box::new(FixedAnalyze {
             srt: "1\n00:00:00,000 --> 00:00:01,000\n[Grace Hopper] opened line\n\n".into(),
         }),
+        socioscope_bin: bin,
+        models_dir: dir.join("models"),
+        config_path: dir.join("config.yaml"),
     })
 }
 
@@ -65,7 +72,8 @@ async fn the_shell_is_a_responsive_app() {
     assert!(html.contains("/record"), "{html}");
     assert!(html.contains("id=\"theme\""), "{html}");
     assert!(html.contains("Switch to dark mode"), "{html}");
-    assert!(html.contains("max-w-lg grid-cols-3") || html.contains("grid-cols-3"), "{html}");
+    assert!(html.contains("grid-cols-4"), "{html}");
+    assert!(html.contains("/models"), "{html}");
 
     let fragment = app
         .oneshot(
@@ -288,4 +296,56 @@ async fn a_text_file_is_rejected() {
         "{html}"
     );
     assert!(!dir.join("bundles").exists() || std::fs::read_dir(dir.join("bundles")).unwrap().next().is_none());
+}
+
+#[tokio::test]
+async fn the_model_shelf_is_the_cli_shelf() {
+    let dir = std::env::temp_dir().join(format!("socioscope-shelf-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("fake-socioscope");
+    std::fs::write(
+        &bin,
+        r#"#!/bin/sh
+if [ "$1" = "models" ] && [ "$2" = "list" ]; then
+  printf '%s\n' '{"note":"QVAC is not the downloader","models":[{"id":"cactus-whistle","name":"Whistle","role":"transcription","badge":"Smallest","runtime":"Cactus Needle","runnable":false,"summary":"A tiny speech model.","license":"see card","released":"2026","size":"16.9 MB","state":"missing","active":false,"received":0,"total":1,"detail":""},{"id":"whisper-tiny-en","name":"Tiny","role":"transcription","badge":"Fast","runtime":"whisper.cpp","runnable":true,"summary":"Runs here.","license":"MIT","released":"2022","size":"74.0 MB","state":"ready","active":false,"received":1,"total":1,"detail":""}]}'
+  exit 0
+fi
+exit 1
+"#,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&bin, perms).unwrap();
+    let app = app_bin(dir, bin);
+
+    let page = app
+        .clone()
+        .oneshot(Request::builder().uri("/models").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body(page).await;
+    assert!(html.contains("Whistle"), "{html}");
+    assert!(html.contains("QVAC is not the downloader"), "{html}");
+    assert!(html.contains("Download"), "{html}");
+    assert!(html.contains(">Use<"), "{html}");
+    assert!(html.contains("grid-cols-4"), "{html}");
+
+    let fragment = app
+        .oneshot(
+            Request::builder()
+                .uri("/models")
+                .header("hx-request", "true")
+                .header("hx-target", "stage")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let partial = body(fragment).await;
+    assert!(partial.contains("Whistle"), "{partial}");
+    assert!(!partial.contains("<html"), "{partial}");
 }

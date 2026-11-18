@@ -9,10 +9,12 @@ mod view;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Form, Multipart, Path as UrlPath, Query, State};
@@ -67,6 +69,9 @@ pub struct AppConfig {
     pub opening_srt: String,
     pub full_tape: Option<PathBuf>,
     pub analyzer: Box<dyn Analyze + Send>,
+    pub socioscope_bin: PathBuf,
+    pub models_dir: PathBuf,
+    pub config_path: PathBuf,
 }
 
 struct Inner {
@@ -78,6 +83,9 @@ struct Inner {
     lives: Mutex<HashMap<String, Arc<Mutex<Live>>>>,
     stops: Mutex<HashMap<String, Arc<AtomicBool>>>,
     jobs: Sender<String>,
+    socioscope_bin: PathBuf,
+    models_dir: PathBuf,
+    config_path: PathBuf,
 }
 
 #[derive(Clone)]
@@ -109,7 +117,29 @@ pub fn router() -> Router {
         analyzer: Box::new(EngineAnalyze {
             engine: Engine::new(),
         }),
+        socioscope_bin: socioscope_bin(),
+        models_dir: std::env::var("SOCIOSCOPE_MODELS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("socioscope-models")),
+        config_path: std::env::var("SOCIOSCOPE_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("config.yaml")),
     })
+}
+
+fn socioscope_bin() -> PathBuf {
+    if let Ok(path) = std::env::var("SOCIOSCOPE_BIN") {
+        return PathBuf::from(path);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join("socioscope");
+            if sibling.is_file() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from("socioscope")
 }
 
 pub fn router_from(config: AppConfig) -> Router {
@@ -126,11 +156,17 @@ pub fn router_from(config: AppConfig) -> Router {
             lives: Mutex::new(HashMap::new()),
             stops: Mutex::new(HashMap::new()),
             jobs: tx,
+            socioscope_bin: config.socioscope_bin,
+            models_dir: config.models_dir,
+            config_path: config.config_path,
         }),
     };
     Router::new()
         .route("/", get(home))
         .route("/record", get(record_page))
+        .route("/models", get(models_page))
+        .route("/models/{id}/download", post(download_model))
+        .route("/models/{id}/use", post(use_model))
         .route("/package", get(package_page))
         .route("/library", get(library))
         .route("/recordings", post(start_recording))
@@ -664,6 +700,7 @@ async fn font(UrlPath(name): UrlPath<String>) -> Response {
 enum Screen<'a> {
     Home,
     Record,
+    Models,
     Catalog,
     Files,
     Bundle(&'a str),
@@ -673,7 +710,7 @@ fn page(state: &AppState, headers: &HeaderMap, screen: Screen, bundle: Option<&s
     let stage = match screen {
         Screen::Home => view::home_stage(state.inner.full_tape.is_some()),
         Screen::Record => view::record_stage(state.inner.full_tape.is_some()),
-        Screen::Catalog | Screen::Files | Screen::Bundle(_) => String::new(),
+        Screen::Catalog | Screen::Files | Screen::Bundle(_) | Screen::Models => String::new(),
     };
     respond(state, headers, screen, bundle, stage)
 }
@@ -693,6 +730,7 @@ fn respond(state: &AppState, headers: &HeaderMap, screen: Screen, bundle: Option
     let (tab, library_mobile, stage_mobile, package_mobile) = match screen {
         Screen::Home => ("library", true, true, false),
         Screen::Record => ("record", false, true, false),
+        Screen::Models => ("models", false, true, false),
         Screen::Catalog => ("package", false, false, true),
         Screen::Files => ("package", false, true, false),
         Screen::Bundle(id) => {
@@ -705,6 +743,7 @@ fn respond(state: &AppState, headers: &HeaderMap, screen: Screen, bundle: Option
         .unwrap_or_else(|| "/package".into());
     let title = match screen {
         Screen::Record => "Record · socioscope",
+        Screen::Models => "Models · socioscope",
         Screen::Catalog | Screen::Files => "Package · socioscope",
         Screen::Bundle(_) => "Session · socioscope",
         Screen::Home => "socioscope",
@@ -783,6 +822,112 @@ fn analysis_error(dir: &Path) -> String {
         .find(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('*') && !line.starts_with('|'))
         .unwrap_or("The read failed.")
         .to_string()
+}
+
+async fn models_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let (stage, _) = models_stage(&state, "");
+    respond(&state, &headers, Screen::Models, None, stage)
+}
+
+async fn download_model(State(state): State<AppState>, headers: HeaderMap, UrlPath(id): UrlPath<String>) -> Response {
+    if !model_id_ok(&id) {
+        return (StatusCode::BAD_REQUEST, "No such model").into_response();
+    }
+    let bin = state.inner.socioscope_bin.clone();
+    let models_dir = state.inner.models_dir.clone();
+    let config_path = state.inner.config_path.clone();
+    let spawned = Command::new(&bin)
+        .args(["models", "download", &id])
+        .env("SOCIOSCOPE_MODELS", &models_dir)
+        .env("SOCIOSCOPE_CONFIG", &config_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    let error = match spawned {
+        Ok(child) => {
+            thread::spawn(move || {
+                let _ = child.wait_with_output();
+            });
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            String::new()
+        }
+        Err(error) => format!("Could not start {bin}: {error}", bin = bin.display()),
+    };
+    let (stage, _) = models_stage(&state, &error);
+    respond(&state, &headers, Screen::Models, None, stage)
+}
+
+async fn use_model(State(state): State<AppState>, headers: HeaderMap, UrlPath(id): UrlPath<String>) -> Response {
+    if !model_id_ok(&id) {
+        return (StatusCode::BAD_REQUEST, "No such model").into_response();
+    }
+    let bin = state.inner.socioscope_bin.clone();
+    let models_dir = state.inner.models_dir.clone();
+    let config_path = state.inner.config_path.clone();
+    let switched = tokio::task::spawn_blocking(move || {
+        Command::new(bin)
+            .args(["models", "use", &id])
+            .env("SOCIOSCOPE_MODELS", models_dir)
+            .env("SOCIOSCOPE_CONFIG", config_path)
+            .output()
+    })
+    .await;
+    let error = match switched {
+        Ok(Ok(output)) if output.status.success() => String::new(),
+        Ok(Ok(output)) => {
+            let text = String::from_utf8_lossy(&output.stderr);
+            let text = text.trim();
+            if text.is_empty() {
+                "The model was not switched.".into()
+            } else {
+                text.to_string()
+            }
+        }
+        Ok(Err(error)) => error.to_string(),
+        Err(error) => error.to_string(),
+    };
+    let (stage, _) = models_stage(&state, &error);
+    respond(&state, &headers, Screen::Models, None, stage)
+}
+
+fn models_stage(state: &AppState, error: &str) -> (String, bool) {
+    match shelf(state) {
+        Ok(shelf) => (view::models_stage(&shelf.note, &shelf.models, error), true),
+        Err(cli_error) => {
+            let message = if error.is_empty() { cli_error } else { format!("{error} {cli_error}") };
+            (view::models_stage("The model shelf comes from the socioscope CLI.", &[], &message), false)
+        }
+    }
+}
+
+fn shelf(state: &AppState) -> Result<socioscope::models::Shelf, String> {
+    let output = Command::new(&state.inner.socioscope_bin)
+        .args(["models", "list", "--json"])
+        .env("SOCIOSCOPE_MODELS", &state.inner.models_dir)
+        .env("SOCIOSCOPE_CONFIG", &state.inner.config_path)
+        .output()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("Could not start {}.", state.inner.socioscope_bin.display())
+            } else {
+                error.to_string()
+            }
+        })?;
+    if !output.status.success() {
+        let text = String::from_utf8_lossy(&output.stderr);
+        let text = text.trim();
+        return Err(if text.is_empty() {
+            "The model shelf failed.".into()
+        } else {
+            text.to_string()
+        });
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+fn model_id_ok(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
 }
 
 fn hx(headers: &HeaderMap) -> bool {

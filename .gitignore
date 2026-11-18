@@ -194,4 +194,5 @@ tests/data/jfk-rmn/
 .DS_store
 
 socioscope-data/
+socioscope-models/
 rust/socioscope-web/node_modules/

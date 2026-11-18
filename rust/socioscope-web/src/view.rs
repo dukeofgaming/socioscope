@@ -72,6 +72,7 @@ window.socioscopeTheme = function (mode, persist) {{
 <span class="hidden text-[11px] uppercase tracking-[0.18em] text-muted min-[420px]:inline">field notes</span>
 </a>
 <div class="ml-auto flex items-center gap-2">
+<a href="/models" class="hidden rounded-full border border-line px-3 py-1.5 text-sm text-muted sm:inline">Models</a>
 <a href="/record" class="hidden rounded-full bg-copper px-3 py-1.5 text-sm font-medium text-on-copper hover:opacity-90 sm:inline">Record</a>
 <button type="button" id="theme" class="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1.5 text-sm text-muted" aria-pressed="false" aria-label="Switch to dark mode">
 <span class="theme-moon" aria-hidden="true"><svg class="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 14.5A7.5 7.5 0 0 1 9.5 4 6.5 6.5 0 1 0 20 14.5z"/></svg></span>
@@ -85,7 +86,7 @@ window.socioscopeTheme = function (mode, persist) {{
 <aside id="package" class="{package_class} border-line lg:border-l">{package}</aside>
 </div>
 <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-paper/95 backdrop-blur lg:hidden" style="padding-bottom: env(safe-area-inset-bottom)">
-<ul class="mx-auto grid max-w-lg grid-cols-3">{tabs}</ul>
+<ul class="mx-auto grid max-w-lg grid-cols-4">{tabs}</ul>
 </nav>
 </body>
 </html>"##,
@@ -161,6 +162,7 @@ pub fn home_stage(full_tape: bool) -> String {
 <p class="max-w-md text-sm leading-relaxed text-muted sm:text-base">Record from the debate tape, or open an audio file. Each session is stored as an OKF package: the original audio, the transcript, and the notes around them.</p>
 <div class="flex flex-wrap items-center gap-3">
 <a href="/record" class="rounded-full bg-copper px-4 py-2 text-sm font-medium text-on-copper">Record</a>
+<a href="/models" class="rounded-full border border-line px-4 py-2 text-sm">Models</a>
 {open}
 </div>
 {path}
@@ -420,10 +422,103 @@ fn path_form() -> &'static str {
 </details>"##
 }
 
+pub fn models_stage(note: &str, models: &[socioscope::models::Listed], error: &str) -> String {
+    let polling = models.iter().any(|model| model.state == "downloading");
+    let trigger = if polling {
+        r##" hx-get="/models" hx-trigger="every 1s" hx-target="#stage" hx-swap="innerHTML""##
+    } else {
+        ""
+    };
+    let error = if error.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<p class="rounded-2xl border border-line bg-panel p-4 text-sm">{text}</p>"#, text = escape(error))
+    };
+    let transcription = model_group("Transcription", models, "transcription");
+    let diarization = model_group("Diarization", models, "diarization");
+    format!(
+        r#"<section class="mx-auto flex max-w-xl flex-col gap-6"{trigger}>
+<p class="text-[11px] uppercase tracking-[0.18em] text-copper">Shelf</p>
+<h1 class="font-serif text-4xl leading-none tracking-tight">Models</h1>
+<p class="text-sm leading-relaxed text-muted">{note}</p>
+{error}
+{transcription}
+{diarization}
+</section>"#,
+        note = escape(note),
+    )
+}
+
+fn model_group(title: &str, models: &[socioscope::models::Listed], role: &str) -> String {
+    let cards: String = models
+        .iter()
+        .filter(|model| model.role == role)
+        .map(model_card)
+        .collect();
+    format!(
+        r#"<section class="flex flex-col gap-3">
+<h2 class="font-serif text-2xl">{title}</h2>
+{cards}
+</section>"#
+    )
+}
+
+fn model_card(model: &socioscope::models::Listed) -> String {
+    let id = escape(&model.id);
+    let detail = if model.detail.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<p class="text-sm text-muted">{text}</p>"#, text = escape(&model.detail))
+    };
+    let progress = if model.state == "downloading" && model.total > 0 {
+        let pct = (model.received.saturating_mul(100) / model.total).min(100);
+        format!(r#"<p class="text-sm text-muted">Downloading {pct}%</p>"#)
+    } else if model.state == "downloading" {
+        r#"<p class="text-sm text-muted">Downloading</p>"#.to_string()
+    } else {
+        String::new()
+    };
+    let action = if model.active {
+        r#"<span class="text-sm text-copper">In use</span>"#.to_string()
+    } else if model.state == "ready" && model.runnable {
+        format!(
+            r##"<form method="post" action="/models/{id}/use" hx-post="/models/{id}/use" hx-target="#stage" hx-swap="innerHTML"><button class="rounded-full bg-copper px-3 py-1.5 text-sm font-medium text-on-copper" type="submit">Use</button></form>"##
+        )
+    } else if model.state == "ready" {
+        r#"<span class="text-sm text-muted">Downloaded</span>"#.to_string()
+    } else if model.state != "downloading" {
+        format!(
+            r##"<form method="post" action="/models/{id}/download" hx-post="/models/{id}/download" hx-target="#stage" hx-swap="innerHTML"><button class="rounded-full border border-line px-3 py-1.5 text-sm" type="submit">Download</button></form>"##
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<article class="rounded-2xl border border-line bg-panel p-4">
+<div class="flex items-baseline justify-between gap-3">
+<h3 class="font-serif text-2xl leading-tight">{name}</h3>
+<span class="shrink-0 text-[11px] uppercase tracking-[0.16em] text-copper">{badge}</span>
+</div>
+<p class="mt-1 text-xs text-muted">{size} · {runtime} · {released}</p>
+<p class="mt-2 text-sm leading-relaxed">{summary}</p>
+{detail}
+{progress}
+<div class="mt-3 flex items-center gap-3">{action}</div>
+</article>"#,
+        name = escape(&model.name),
+        badge = escape(&model.badge),
+        size = escape(&model.size),
+        runtime = escape(&model.runtime),
+        released = escape(&model.released),
+        summary = escape(&model.summary),
+    )
+}
+
 fn tabs(active: &str, package_href: &str) -> String {
     [
         ("library", "/", "Library", "M4 6h16M4 12h16M4 18h10"),
         ("record", "/record", "Record", "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"),
+        ("models", "/models", "Models", "M5 7h14v10H5zM8 7V5h8v2"),
         ("package", package_href, "Package", "M4 7h16v12H4zM4 7l8-3 8 3"),
     ]
     .into_iter()
