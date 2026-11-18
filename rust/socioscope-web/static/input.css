@@ -1,0 +1,184 @@
+@import "tailwindcss";
+@source "../src";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --paper: #f4efe6;
+  --ink: #1c1915;
+  --muted: #6f675c;
+  --line: #e3d8c8;
+  --panel: #fffaf3;
+  --copper: #b8432f;
+  --on-copper: #fffaf3;
+  --moss: #21573c;
+  color-scheme: light;
+}
+
+.dark {
+  --paper: #12110e;
+  --ink: #f4efe6;
+  --muted: #c4b7a6;
+  --line: #3d362e;
+  --panel: #221e1a;
+  --copper: #e7a090;
+  --on-copper: #2a1210;
+  --moss: #9dceb4;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces", "Iowan Old Style", Palatino, Georgia, serif;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-panel: var(--panel);
+  --color-copper: var(--copper);
+  --color-on-copper: var(--on-copper);
+  --color-moss: var(--moss);
+}
+
+@font-face {
+  font-family: Outfit;
+  src: url("/fonts/outfit-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("/fonts/outfit-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Outfit;
+  src: url("/fonts/outfit-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Fraunces;
+  src: url("/fonts/fraunces-500.woff2") format("woff2");
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: Fraunces;
+  src: url("/fonts/fraunces-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@layer base {
+  body {
+    font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+  }
+  button, input, textarea {
+    font: inherit;
+  }
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    display: grid;
+    max-height: 100dvh;
+    grid-template-columns: 16.5rem minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "header header"
+      "library stage";
+  }
+  .app-shell.has-package {
+    grid-template-columns: 15rem minmax(0, 1fr) 18rem;
+    grid-template-areas:
+      "header header header"
+      "library stage package";
+  }
+  .app-header { grid-area: header; }
+  #library { grid-area: library; overflow: auto; }
+  #stage { grid-area: stage; overflow: auto; }
+  #package { grid-area: package; overflow: auto; }
+}
+
+.spk-0 { --spk: #1f6f86; }
+.spk-1 { --spk: #8a5a12; }
+.spk-2 { --spk: #8d3d4a; }
+.spk-3 { --spk: #21573c; }
+.spk-4 { --spk: #4c4780; }
+.spk-5 { --spk: #6b4a32; }
+.dark .spk-0 { --spk: #8ec8d8; }
+.dark .spk-1 { --spk: #e3b56a; }
+.dark .spk-2 { --spk: #e7a3ae; }
+.dark .spk-3 { --spk: #8fbfa4; }
+.dark .spk-4 { --spk: #b7b3e0; }
+.dark .spk-5 { --spk: #d2b09a; }
+
+.cue.is-active {
+  background: color-mix(in srgb, var(--spk, var(--copper)) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--spk, var(--copper));
+}
+
+.record-btn {
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 999px;
+  background: var(--copper);
+  color: var(--on-copper);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--copper) 22%, transparent);
+}
+.record-btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+.record-btn[data-state="live"] {
+  animation: pulse-ring 1.6s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--copper) 55%, transparent); }
+  100% { box-shadow: 0 0 0 18px transparent; }
+}
+
+.theme-icon { width: 1rem; height: 1rem; display: block; }
+html:not(.dark) .theme-sun { display: none; }
+.dark .theme-moon { display: none; }
+
+.meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 4.25rem;
+}
+.meter i,
+.meter button {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  border-radius: 999px 999px 2px 2px;
+  background: color-mix(in srgb, var(--copper) 80%, var(--ink));
+}
+
+@media (max-width: 280px) {
+  .record-btn { width: 4.6rem; height: 4.6rem; }
+  .meter { height: 2.6rem; }
+}
