@@ -1,0 +1,10 @@
+{
+  "name": "socioscope-desertant",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@desert-ant-labs/voz": "4.3.0",
+    "@desert-ant-labs/who": "4.3.0",
+    "onnxruntime-node": "1.21.0"
+  }
+}

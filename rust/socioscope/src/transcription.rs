@@ -4,7 +4,8 @@ use serde_json::{json, Value};
 
 use crate::audio::convert_to_wav;
 use crate::config::Config;
-use crate::diarize::Diarizer;
+use crate::diarize::{self, Diarizer};
+use crate::engines;
 use crate::error::Error;
 use crate::json_io::write_json;
 use crate::merge::merge_diarization_transcription;
@@ -61,9 +62,20 @@ impl AudioTranscriber for Engine {
         println!("Transcribing {}...", file_path.display());
         let config = Config::load()?;
         let source_wav = get_source_wav_path(file_path);
-        let segments = self
-            .whisper
-            .transcribe(&config.transcription.model, &source_wav)?;
+        let segments = match config.transcription.engine.as_str() {
+            "cactus" => engines::transcribe_cactus(Path::new(&config.transcription.model), &source_wav)?,
+            "audiocpp" => engines::transcribe_audiocpp(
+                &config.transcription.family,
+                Path::new(&config.transcription.model),
+                &source_wav,
+            )?,
+            "desertant" => {
+                engines::transcribe_desertant(Path::new(&config.transcription.model), &source_wav)?
+            }
+            _ => self
+                .whisper
+                .transcribe(&config.transcription.model, &source_wav)?,
+        };
 
         let transcription: Vec<Value> = segments
             .iter()
@@ -103,8 +115,29 @@ impl AudioTranscriber for Engine {
                 "config.yaml is missing diarization.segmentation_model and diarization.embedding_model",
             )
         })?;
-        self.diarizer
-            .diarize(diarization, &source_wav, &output_directory)?;
+        match diarization.engine.as_str() {
+            "audiocpp" => {
+                let turns = engines::diarize_audiocpp(
+                    &diarization.family,
+                    Path::new(&diarization.model),
+                    &source_wav,
+                )?;
+                diarize::write_turns(&output_directory, &source_wav, &turns)?;
+            }
+            "desertant" => {
+                let turns = engines::diarize_desertant(Path::new(&diarization.model), &source_wav)?;
+                diarize::write_turns(&output_directory, &source_wav, &turns)?;
+            }
+            _ => {
+                if diarization.segmentation_model.is_empty() || diarization.embedding_model.is_empty() {
+                    return Err(Error::new(
+                        "config.yaml is missing diarization.segmentation_model and diarization.embedding_model",
+                    ));
+                }
+                self.diarizer
+                    .diarize(diarization, &source_wav, &output_directory)?;
+            }
+        }
 
         println!(
             "Merging diarization and transcription for {}...",

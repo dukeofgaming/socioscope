@@ -29,6 +29,9 @@ pub struct Model {
     pub role: String,
     pub badge: String,
     pub runtime: String,
+    pub engine: String,
+    #[serde(default)]
+    pub family: String,
     pub summary: String,
     pub license: String,
     pub released: String,
@@ -307,7 +310,7 @@ fn activate_model(model: &Model, dir: &Path, config_path: &Path) -> Result<Strin
     }
     if !model.runnable {
         return Err(Error::new(format!(
-            "{} is on disk. This build transcribes with Whisper and diarizes with pyannote, so it was not switched.",
+            "{} is on disk. This build has no engine for it, so it was not switched.",
             model.name
         )));
     }
@@ -319,24 +322,24 @@ fn activate_model(model: &Model, dir: &Path, config_path: &Path) -> Result<Strin
     };
     let root = mapping(&mut value);
     if model.role == "transcription" {
-        let path = slot(model, dir, "weights")?;
+        let path = selected_path(model, dir)?;
         let transcription = child(root, "transcription");
-        transcription.insert(
-            serde_yaml::Value::String("model".into()),
-            serde_yaml::Value::String(path.display().to_string()),
-        );
+        insert_string(transcription, "model", &path.display().to_string());
+        insert_string(transcription, "engine", &model.engine);
+        insert_string(transcription, "family", &model.family);
     } else if model.role == "diarization" {
-        let segmentation = slot(model, dir, "segmentation")?;
-        let embedding = slot(model, dir, "embedding")?;
         let diarization = child(root, "diarization");
-        diarization.insert(
-            serde_yaml::Value::String("segmentation_model".into()),
-            serde_yaml::Value::String(segmentation.display().to_string()),
-        );
-        diarization.insert(
-            serde_yaml::Value::String("embedding_model".into()),
-            serde_yaml::Value::String(embedding.display().to_string()),
-        );
+        insert_string(diarization, "engine", &model.engine);
+        insert_string(diarization, "family", &model.family);
+        if model.engine == "sherpa" {
+            let segmentation = slot(model, dir, "segmentation")?;
+            let embedding = slot(model, dir, "embedding")?;
+            insert_string(diarization, "segmentation_model", &segmentation.display().to_string());
+            insert_string(diarization, "embedding_model", &embedding.display().to_string());
+        } else {
+            let path = selected_path(model, dir)?;
+            insert_string(diarization, "model", &path.display().to_string());
+        }
     } else {
         return Err(Error::new(format!("{} has no role this CLI can select.", model.name)));
     }
@@ -355,6 +358,20 @@ fn activate_model(model: &Model, dir: &Path, config_path: &Path) -> Result<Strin
     }
     write_active(dir, &active)?;
     Ok(format!("{} is the {} model now.", model.name, model.role))
+}
+
+fn selected_path(model: &Model, dir: &Path) -> Result<PathBuf, Error> {
+    if model.engine == "desertant" {
+        return Ok(dir.join(&model.id));
+    }
+    slot(model, dir, "weights")
+}
+
+fn insert_string(map: &mut serde_yaml::Mapping, key: &str, value: &str) {
+    map.insert(
+        serde_yaml::Value::String(key.into()),
+        serde_yaml::Value::String(value.into()),
+    );
 }
 
 fn slot(model: &Model, dir: &Path, slot_name: &str) -> Result<PathBuf, Error> {
@@ -531,8 +548,11 @@ mod tests {
             assert!(ids.contains(&id), "{ids:?}");
         }
         assert!(shelf.note.contains("QVAC"));
-        assert!(shelf.models.iter().any(|model| model.runnable && model.role == "transcription"));
-        assert!(shelf.models.iter().any(|model| model.id == "nemotron-3-diarization-q8" && !model.runnable));
+        assert!(shelf.models.iter().all(|model| model.runnable));
+        let catalog = catalog().unwrap();
+        assert!(catalog.models.iter().any(|model| model.engine == "cactus"));
+        assert!(catalog.models.iter().any(|model| model.engine == "audiocpp" && model.family == "nemotron_3_diar"));
+        assert!(catalog.models.iter().any(|model| model.engine == "desertant"));
     }
 
     #[test]
@@ -559,6 +579,8 @@ mod tests {
             role: "transcription".into(),
             badge: "Fast".into(),
             runtime: "whisper.cpp".into(),
+            engine: "whisper".into(),
+            family: String::new(),
             summary: "A test weight.".into(),
             license: "MIT".into(),
             released: "2026".into(),
@@ -580,6 +602,7 @@ mod tests {
         let text = fs::read_to_string(&config).unwrap();
         assert!(text.contains("keep"), "{text}");
         assert!(text.contains("toy.bin"), "{text}");
+        assert!(text.contains("engine: whisper"), "{text}");
         assert!(!text.contains("model: old"), "{text}");
 
         let parked = Model {
@@ -588,6 +611,8 @@ mod tests {
             role: "diarization".into(),
             badge: "Best".into(),
             runtime: "Nemotron".into(),
+            engine: "audiocpp".into(),
+            family: "nemotron_3_diar".into(),
             summary: "Not wired.".into(),
             license: "OpenMDW-1.1".into(),
             released: "2026".into(),

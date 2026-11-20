@@ -17,11 +17,26 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 pub struct TranscriptionConfig {
     pub model: String,
+    /// whisper, cactus, audiocpp, or desertant. Empty means whisper.
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub family: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DiarizationConfig {
+    /// sherpa, audiocpp, or desertant. Empty means sherpa.
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub family: String,
+    /// Single weight file, or the model directory for Desert Ant.
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
     pub segmentation_model: String,
+    #[serde(default)]
     pub embedding_model: String,
     #[serde(default = "default_num_clusters")]
     pub num_clusters: i32,
@@ -40,7 +55,10 @@ fn default_threshold() -> f32 {
 impl Config {
     /// `config.yaml` in the working directory, same place the Python code opens it.
     pub fn load() -> Result<Self, Error> {
-        Self::load_from(Path::new("config.yaml"))
+        let path = std::env::var("SOCIOSCOPE_CONFIG")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| Path::new("config.yaml").to_path_buf());
+        Self::load_from(&path)
     }
 
     pub fn load_from(path: &Path) -> Result<Self, Error> {
