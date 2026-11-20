@@ -126,6 +126,39 @@ fn load(config: &DiarizationConfig) -> Result<OfflineSpeakerDiarization, Error> 
         .ok_or_else(|| Error::new("failed to initialize offline speaker diarization"))
 }
 
+pub fn write_turns(
+    output_directory: &Path,
+    wav_path: &Path,
+    turns: &[(f64, f64, String)],
+) -> Result<(), Error> {
+    let mut segments = Vec::new();
+    for (start, end, speaker) in turns {
+        let start_timestamp = convert_to_timestamp(*start);
+        let end_timestamp = convert_to_timestamp(*end);
+        println!("start={start_timestamp} stop={end_timestamp} speaker_{speaker}");
+        segments.push(json!({
+            "timestamps": { "from": start_timestamp, "to": end_timestamp },
+            "offsets": {
+                "from": convert_to_milliseconds(*start),
+                "to": convert_to_milliseconds(*end),
+            },
+            "speaker": speaker,
+        }));
+    }
+    write_json(
+        &output_directory.join("diarization.json"),
+        &Value::Array(segments.clone()),
+    )?;
+    write_rttm(
+        &output_directory.join("diarization.rttm"),
+        wav_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("<NA>"),
+        &segments,
+    )
+}
+
 fn write_rttm(path: &Path, uri: &str, segments: &[Value]) -> Result<(), Error> {
     let mut body = String::new();
     for segment in segments {

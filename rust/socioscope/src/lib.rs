@@ -2,6 +2,7 @@ pub mod audio;
 pub mod cli;
 pub mod config;
 pub mod diarize;
+pub mod engines;
 pub mod error;
 pub mod json_io;
 pub mod merge;

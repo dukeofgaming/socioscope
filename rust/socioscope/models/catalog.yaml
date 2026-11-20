@@ -1,14 +1,16 @@
-note: "A shelf for an M3 Max with 48 GB, keeping each model inside about 24 GB. Nothing here is close to that ceiling. QVAC is not the downloader: its SDK runs Whisper, Parakeet, and Nemotron, and it does not run Desert Ant Voz, Desert Ant Who, or Cactus Whistle."
+note: "A shelf for an M3 Max with 48 GB, keeping each model inside about 24 GB. Nothing here is close to that ceiling. QVAC is not the downloader. Whistle runs on the Cactus engine, Parakeet and Nemotron 3 run on audio.cpp, and Voz and Who run on Desert Ant. Whisper and pyannote stay on the engines this CLI already linked."
 models:
   - id: "cactus-whistle"
     name: "Whistle"
     role: "transcription"
     badge: "Smallest"
     runtime: "Cactus Needle"
-    summary: "Cactus Needle's speech model. 16.9 MB, seven languages, word timestamps, and a 30 second window on the same engine as Needle. This build can download it and cannot transcribe with it yet."
+    engine: "cactus"
+    family: ""
+    summary: "Cactus Needle's speech model. 16.9 MB, seven languages, word timestamps, and a 30 second window. The CLI runs it with the Cactus engine."
     license: "see the Cactus-Compute/whistle model card"
     released: "2026"
-    runnable: false
+    runnable: true
     files:
     - url: "https://huggingface.co/Cactus-Compute/whistle/resolve/main/whistle.cact"
       filename: "whistle.cact"
@@ -20,6 +22,8 @@ models:
     role: "transcription"
     badge: "Fast"
     runtime: "whisper.cpp"
+    engine: "whisper"
+    family: ""
     summary: "The smallest Whisper this app can run. English only, about 74 MB, and quick enough to keep loaded."
     license: "MIT"
     released: "2022"
@@ -34,7 +38,9 @@ models:
     role: "transcription"
     badge: "Best here"
     runtime: "whisper.cpp"
-    summary: "The best transcription this build can run. Turbo quality at 834 MB, which sits easily inside the 24 GB you can spare on an M3 Max. Metal is used when the CLI was built on macOS."
+    engine: "whisper"
+    family: ""
+    summary: "The best Whisper this build can run. Turbo quality at 834 MB, which sits easily inside the 24 GB you can spare on an M3 Max. Metal is used when the CLI was built on macOS."
     license: "MIT"
     released: "2024"
     runnable: true
@@ -49,10 +55,12 @@ models:
     role: "transcription"
     badge: "Neural Engine"
     runtime: "Desert Ant"
-    summary: "Desert Ant's on-device transcription. Parakeet TDT 0.6B v3, converted for the Apple Neural Engine, with word timestamps in 25 languages. The Core ML graphs are 326 MB. This build stores them and does not run them yet."
+    engine: "desertant"
+    family: "voz"
+    summary: "Desert Ant's transcription. Parakeet TDT 0.6B v3 in 25 languages, with a time on every word. The download keeps the Core ML graphs for Apple and the ONNX graphs the Node engine runs on Linux and macOS."
     license: "CC-BY-4.0"
     released: "2026"
-    runnable: false
+    runnable: true
     files:
     - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/decoder.mlmodelc/analytics/coremldata.bin"
       filename: "decoder.mlmodelc/analytics/coremldata.bin"
@@ -114,29 +122,61 @@ models:
       filename: "mel.mlmodelc/weights/weight.bin"
       bytes: 826688
       slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/decoder.onnx"
+      filename: "web/decoder.onnx"
+      bytes: 24472430
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/decoder.webgpu.onnx"
+      filename: "web/decoder.webgpu.onnx"
+      bytes: 24472430
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/embedding.f16"
+      filename: "web/embedding.f16"
+      bytes: 10487040
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/encoder.onnx"
+      filename: "web/encoder.onnx"
+      bytes: 813056
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/encoder.onnx.data"
+      filename: "web/encoder.onnx.data"
+      bytes: 348981248
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/meta.json"
+      filename: "web/meta.json"
+      bytes: 539
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/voz/resolve/main/web/vocab.json"
+      filename: "web/vocab.json"
+      bytes: 78654
+      slot: "weights"
   - id: "parakeet-tdt-v3-q8"
     name: "Parakeet TDT 0.6B v3, Q8"
     role: "transcription"
     badge: "Recent"
-    runtime: "parakeet.cpp"
-    summary: "The same NVIDIA family as Voz, in one 643 MB GGUF. A community conversion of the official checkpoint. This build can download it and cannot transcribe with it yet."
+    runtime: "audio.cpp"
+    engine: "audiocpp"
+    family: "parakeet_tdt"
+    summary: "Parakeet TDT 0.6B v3, the same family as Voz, as the 916 MB Q8 GGUF audio.cpp runs. Twenty-five languages, with word times."
     license: "CC-BY-4.0"
     released: "2025"
-    runnable: false
+    runnable: true
     files:
-    - url: "https://huggingface.co/cstr/parakeet-tdt-0.6b-v3-GGUF/resolve/main/parakeet-tdt-0.6b-v3-q8_0.gguf"
+    - url: "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Parakeet-TDT-0.6B-v3-GGUF/parakeet-tdt-0.6b-v3-q8_0.gguf"
       filename: "parakeet-tdt-0.6b-v3-q8_0.gguf"
-      bytes: 674342336
+      bytes: 915735760
       slot: "weights"
   - id: "who-coreml-int8"
     name: "Who"
     role: "diarization"
     badge: "Smallest"
     runtime: "Desert Ant"
-    summary: "Desert Ant's speaker model. 42 MB of 8-bit Core ML, four speakers in each five-minute section, and the same 12.6% AMI error as the larger float16 build. This build stores it and still diarizes with pyannote."
+    engine: "desertant"
+    family: "who"
+    summary: "Desert Ant's speaker model. Four speakers in each five-minute section, overlap, and the same 12.6% AMI error for the 8-bit Core ML and LiteRT builds. On a Mac the native engine uses Core ML. On Linux it uses LiteRT."
     license: "see the desert-ant-labs/who model card"
     released: "2026"
-    runnable: false
+    runnable: true
     files:
     - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/coreml-int8/encoder_30000.mlmodelc/analytics/coremldata.bin"
       filename: "coreml-int8/encoder_30000.mlmodelc/analytics/coremldata.bin"
@@ -234,12 +274,34 @@ models:
       filename: "coreml-int8/who_voice_banks.f32"
       bytes: 82248
       slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/litert-int8/who.tflite"
+      filename: "litert-int8/who.tflite"
+      bytes: 30574096
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/litert-int8/who_embed.f16"
+      filename: "litert-int8/who_embed.f16"
+      bytes: 2621960
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/litert-int8/who_mel_banks.f32"
+      filename: "litert-int8/who_mel_banks.f32"
+      bytes: 23652
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/litert-int8/who_meta.json"
+      filename: "litert-int8/who_meta.json"
+      bytes: 4090
+      slot: "weights"
+    - url: "https://huggingface.co/desert-ant-labs/who/resolve/main/litert-int8/who_voice_banks.f32"
+      filename: "litert-int8/who_voice_banks.f32"
+      bytes: 82248
+      slot: "weights"
   - id: "pyannote-3dspeaker"
     name: "pyannote 3.0 and 3D-Speaker"
     role: "diarization"
     badge: "Runs here"
     runtime: "sherpa-onnx"
-    summary: "The diarizer this build actually runs. pyannote segmentation 3.0 finds speech, and the 3D-Speaker embedding clusters voices. About 43 MB together."
+    engine: "sherpa"
+    family: ""
+    summary: "pyannote segmentation 3.0 finds speech, and the 3D-Speaker embedding clusters voices. About 43 MB together. This is the diarizer linked into the CLI."
     license: "MIT"
     released: "2023"
     runnable: true
@@ -256,14 +318,15 @@ models:
     name: "Nemotron 3 Diarization, Q8"
     role: "diarization"
     badge: "Best"
-    runtime: "Nemotron"
-    summary: "NVIDIA's latest diarizer, from September 2026. About 100M parameters and 102 MB at Q8. Up to eight speakers, overlap, and a 10 ms grid. This build can download the official GGUF and cannot run it yet."
+    runtime: "audio.cpp"
+    engine: "audiocpp"
+    family: "nemotron_3_diar"
+    summary: "NVIDIA's September 2026 diarizer, about 100M parameters. Up to eight speakers, overlap, and a 10 ms grid. This is the audio.cpp Q8 package of that checkpoint, 102 MB, which is the file that engine can load."
     license: "OpenMDW-1.1"
     released: "2026-09"
-    runnable: false
+    runnable: true
     files:
-    - url: "https://huggingface.co/nvidia/Nemotron-3-Diarization/resolve/main/Nemotron-3-Diarization.q8_0.gguf"
-      filename: "Nemotron-3-Diarization.q8_0.gguf"
-      bytes: 107012128
+    - url: "https://huggingface.co/audio-cpp/Nemotron-3-Diarization-GGUF/resolve/main/nemotron-3-diarization-q8_0.gguf"
+      filename: "nemotron-3-diarization-q8_0.gguf"
+      bytes: 106675136
       slot: "weights"
-      sha256: "08456d9e22cd9a323c0364d98375f3746d6e68507ebb705cd46438c534c7a3a1"
