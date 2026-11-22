@@ -13,7 +13,11 @@ cd desktop
 cargo run --release
 ```
 
-It opens the sample library (Roosevelt's first inaugural, the "ask not" excerpt, and a three-speaker sample). Import any `.srt` from the sidebar. Space plays, and the left and right keys move between cues.
+It opens the sample library (Roosevelt's first inaugural, the "ask not" excerpt, and a three-speaker sample). Import any `.srt` from the sidebar. Space plays, and the left and right keys move between cues. The window reflows for a tablet, a phone, and a watch-sized frame.
+
+Each session is an [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format) 0.3 bundle. The Package tab lists the concepts, assets, and log in that bundle.
+
+Models live in `config.yaml` (copy `config.tpl.yaml`). The Config page edits the transcription model path, the diarization model id, and the Hugging Face token. Transcribe locally reads the same file.
 
 ## Command line
 
