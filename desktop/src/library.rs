@@ -21,6 +21,7 @@ pub struct Recording {
     pub order: i32,
     pub from_pipeline: bool,
     pub bundle: Bundle,
+    pub dir: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -202,6 +203,7 @@ fn load_session(dir: &Path, session_path: &Path) -> Option<Recording> {
         order: session.order.unwrap_or(50),
         from_pipeline,
         bundle: okf::load(dir),
+        dir: dir.to_path_buf(),
     })
 }
 

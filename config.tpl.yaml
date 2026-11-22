@@ -16,3 +16,17 @@ models:
     name: pyannote speaker diarization
     engine: pyannote.audio
     id: "pyannote/speaker-diarization-3.1"
+
+plugins:
+  fallacies:
+    enabled: true
+  dsm:
+    enabled: true
+
+engines:
+  laya:
+    path: ""
+    command: laya
+  bonsai:
+    path: ""
+    endpoint: ""

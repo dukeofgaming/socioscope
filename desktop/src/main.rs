@@ -1,6 +1,8 @@
 mod config;
+mod gguf;
 mod library;
 mod okf;
+mod plugins;
 mod srt;
 mod studio;
 mod theme;

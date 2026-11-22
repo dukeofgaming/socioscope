@@ -19,6 +19,8 @@ Each session is an [Open Knowledge Format](https://github.com/open-knowledge-for
 
 Models live in `config.yaml` (copy `config.tpl.yaml`). The Config page edits the transcription model path, the diarization model id, and the Hugging Face token. Transcribe locally reads the same file.
 
+Two plugins sit in the right pane, and each one can be turned off from Config. Fallacies asks Laya about the open session. DSM-5 asks Laya for evidence themes and keeps a profile for each speaker label across the library. A local Bonsai server can correlate a profile. The panes say what they are: draft evidence, not a diagnosis. Point `engines.laya.path` at a Laya GGUF and, if you want correlation, `engines.bonsai.path` plus `engines.bonsai.endpoint`.
+
 ## Command line
 
 1. Activate the virtual environment:

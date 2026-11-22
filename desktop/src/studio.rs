@@ -10,9 +10,10 @@ use gpui_ce_elements::editable_text::{
 };
 use gpui_ce_elements::editable_text::actions::DEFAULT_INPUT_CONTEXT;
 
-use crate::config;
+use crate::config::{self, PluginSettings};
 use crate::library::{self, Recording};
 use crate::okf::Concept;
+use crate::plugins::{self, FallacyHit, Profile};
 use crate::srt::{self, Cue};
 use crate::theme::{self, Theme, speaker_color, with_alpha};
 
@@ -51,6 +52,8 @@ enum Pane {
     Cue,
     File,
     Package,
+    Fallacies,
+    Profile,
 }
 
 fn fit_for(width: f32, height: f32) -> Fit {
@@ -86,6 +89,18 @@ pub struct Studio {
     diarize: Entity<EditableTextState>,
     token: Entity<EditableTextState>,
     token_set: bool,
+    fallacies_on: bool,
+    dsm_on: bool,
+    laya_path: Entity<EditableTextState>,
+    laya_command: String,
+    bonsai_path: Entity<EditableTextState>,
+    bonsai_endpoint: Entity<EditableTextState>,
+    laya_status: String,
+    bonsai_status: String,
+    fallacy_hits: Vec<FallacyHit>,
+    profiles: Vec<Profile>,
+    profile_speaker: Option<String>,
+    plugin_note: Option<String>,
     focus: FocusHandle,
     sheet: ScrollHandle,
     toast: Option<String>,
@@ -111,15 +126,28 @@ pub fn bind_keys(cx: &mut App) {
 impl Studio {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let models = config::load();
+        let plugins = config::load_plugins();
         let query = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
         let whisper = cx.new(|cx| EditableTextState::new(StringStorage::from(models.whisper_path.clone()), cx));
         let diarize = cx.new(|cx| EditableTextState::new(StringStorage::from(models.diarization_id.clone()), cx));
         let token = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
+        let laya_path = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.laya_path.clone()), cx));
+        let bonsai_path = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.bonsai_path.clone()), cx));
+        let bonsai_endpoint = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.bonsai_endpoint.clone()), cx));
         let subscription = cx.subscribe(&query, |_, _, _: &TextChanged, cx| cx.notify());
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let recordings = library::load_library();
         let selected = recordings.first().map(|recording| recording.id.clone());
+        let fallacy_hits = selected
+            .as_ref()
+            .and_then(|id| recordings.iter().find(|recording| &recording.id == id))
+            .map(|recording| plugins::read_hits(&recording.dir))
+            .unwrap_or_default();
+        let profiles = plugins::read_profiles();
+        let profile_speaker = profiles.first().map(|profile| profile.speaker.clone());
+        let laya_status = plugins::laya_status(&plugins.laya_path);
+        let bonsai_status = plugins::bonsai_status(&plugins.bonsai_path);
         Self {
             recordings,
             selected,
@@ -141,6 +169,18 @@ impl Studio {
             diarize,
             token,
             token_set: models.token_set,
+            fallacies_on: plugins.fallacies,
+            dsm_on: plugins.dsm,
+            laya_path,
+            laya_command: plugins.laya_command,
+            bonsai_path,
+            bonsai_endpoint,
+            laya_status,
+            bonsai_status,
+            fallacy_hits,
+            profiles,
+            profile_speaker,
+            plugin_note: None,
             focus,
             sheet: ScrollHandle::new(),
             toast: None,
@@ -249,7 +289,15 @@ impl Studio {
     }
 
     fn editing(&self, window: &Window, cx: &App) -> bool {
-        [&self.query, &self.whisper, &self.diarize, &self.token]
+        [
+            &self.query,
+            &self.whisper,
+            &self.diarize,
+            &self.token,
+            &self.laya_path,
+            &self.bonsai_path,
+            &self.bonsai_endpoint,
+        ]
             .iter()
             .any(|field| field.read(cx).focus_handle(cx).is_focused(window))
     }
@@ -281,6 +329,10 @@ impl Studio {
             .and_then(|recording| recording.cues.first().map(|cue| cue.start_ms as f64))
             .unwrap_or(0.0);
         self.sheet.scroll_to_top_of_item(0);
+        self.fallacy_hits = self
+            .current()
+            .map(|recording| plugins::read_hits(&recording.dir))
+            .unwrap_or_default();
         cx.notify();
     }
 
@@ -1128,36 +1180,60 @@ impl Studio {
         let cue_tab = app.clone();
         let file_tab = app.clone();
         let package_tab = app.clone();
-        panel = panel.child(
-            div()
-                .px(px(12.))
-                .pt(px(12.))
-                .pb(px(8.))
-                .flex()
-                .flex_wrap()
-                .gap(px(6.))
-                .child(chip("tab-cue", "Cue", self.pane == Pane::Cue, theme).on_click(move |_e, _w, cx| {
-                    cue_tab.update(cx, |this, cx| {
-                        this.pane = Pane::Cue;
-                        cx.notify();
-                    }).ok();
-                }))
-                .child(chip("tab-file", "File", self.pane == Pane::File, theme).on_click(move |_e, _w, cx| {
-                    file_tab.update(cx, |this, cx| {
-                        this.pane = Pane::File;
-                        cx.notify();
-                    }).ok();
-                }))
-                .child(chip("tab-package", "Package", self.pane == Pane::Package, theme).on_click(move |_e, _w, cx| {
-                    package_tab.update(cx, |this, cx| {
-                        this.pane = Pane::Package;
-                        cx.notify();
-                    }).ok();
-                })),
-        );
-        match self.pane {
+        let fallacy_tab = app.clone();
+        let profile_tab = app.clone();
+        let mut tabs = div()
+            .px(px(12.))
+            .pt(px(12.))
+            .pb(px(8.))
+            .flex()
+            .flex_wrap()
+            .gap(px(6.))
+            .child(chip("tab-cue", "Cue", self.pane == Pane::Cue, theme).on_click(move |_e, _w, cx| {
+                cue_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Cue;
+                    cx.notify();
+                }).ok();
+            }))
+            .child(chip("tab-file", "File", self.pane == Pane::File, theme).on_click(move |_e, _w, cx| {
+                file_tab.update(cx, |this, cx| {
+                    this.pane = Pane::File;
+                    cx.notify();
+                }).ok();
+            }))
+            .child(chip("tab-package", "Package", self.pane == Pane::Package, theme).on_click(move |_e, _w, cx| {
+                package_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Package;
+                    cx.notify();
+                }).ok();
+            }));
+        if self.fallacies_on {
+            tabs = tabs.child(chip("tab-fallacies", "Fallacies", self.pane == Pane::Fallacies, theme).on_click(move |_e, _w, cx| {
+                fallacy_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Fallacies;
+                    cx.notify();
+                }).ok();
+            }));
+        }
+        if self.dsm_on {
+            tabs = tabs.child(chip("tab-profile", "Profile", self.pane == Pane::Profile, theme).on_click(move |_e, _w, cx| {
+                profile_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Profile;
+                    cx.notify();
+                }).ok();
+            }));
+        }
+        panel = panel.child(tabs);
+        let pane = match self.pane {
+            Pane::Fallacies if !self.fallacies_on => Pane::Cue,
+            Pane::Profile if !self.dsm_on => Pane::Cue,
+            other => other,
+        };
+        match pane {
             Pane::File => panel.child(file_panel(recording.as_ref(), &self.log, self.busy, app, theme)),
             Pane::Package => panel.child(package_page(recording.as_ref(), self.concept.as_deref(), app, theme)),
+            Pane::Fallacies => panel.child(self.fallacy_pane(app, theme)),
+            Pane::Profile => panel.child(self.profile_pane(app, theme)),
             Pane::Cue => panel.child(cue_panel(recording.as_ref(), self.inspected(), theme)),
         }
     }
@@ -1235,6 +1311,29 @@ impl Studio {
                             .child(token_line),
                     )
                     .child(model_field(theme, "model-token", &self.token, "Paste a token to replace the saved one"))
+                    .child(section_label(theme, "PLUGINS"))
+                    .child(self.plugin_toggle(app.clone(), theme, "plug-fallacies", "Fallacies", "One session. Laya scores each turn.", self.fallacies_on))
+                    .child(self.plugin_toggle(app.clone(), theme, "plug-dsm", "DSM-5", "Profiles across conversations. Evidence, not a diagnosis.", self.dsm_on))
+                    .child(section_label(theme, "ENGINES"))
+                    .child(model_card(
+                        theme,
+                        "Laya",
+                        "Decision model for both plugins",
+                        "model-laya",
+                        &self.laya_path,
+                        "Path to laya-f16.gguf",
+                        &self.laya_status,
+                    ))
+                    .child(model_card(
+                        theme,
+                        "Bonsai",
+                        "Optional correlation for profiles",
+                        "model-bonsai",
+                        &self.bonsai_path,
+                        "Path to a Bonsai GGUF",
+                        &self.bonsai_status,
+                    ))
+                    .child(model_field(theme, "model-bonsai-endpoint", &self.bonsai_endpoint, "http://127.0.0.1:8080"))
                     .child(
                         div()
                             .id("save-config")
@@ -1259,19 +1358,363 @@ impl Studio {
     }
 
     fn save_models(&mut self, cx: &mut Context<Self>) {
+        self.persist(cx, true);
+    }
+
+    fn plugin_settings(&self, cx: &App) -> PluginSettings {
+        PluginSettings {
+            fallacies: self.fallacies_on,
+            dsm: self.dsm_on,
+            laya_path: self.laya_path.read(cx).as_str().to_string(),
+            laya_command: self.laya_command.clone(),
+            bonsai_path: self.bonsai_path.read(cx).as_str().to_string(),
+            bonsai_endpoint: self.bonsai_endpoint.read(cx).as_str().to_string(),
+        }
+    }
+
+    fn persist(&mut self, cx: &mut Context<Self>, clear_token: bool) {
         let whisper = self.whisper.read(cx).as_str().to_string();
         let diarize = self.diarize.read(cx).as_str().to_string();
-        let token = self.token.read(cx).as_str().to_string();
-        match config::save(&whisper, &diarize, &token) {
+        let token = if clear_token { self.token.read(cx).as_str().to_string() } else { String::new() };
+        let plugins = self.plugin_settings(cx);
+        match config::save_studio(&whisper, &diarize, &token, &plugins) {
             Ok(()) => {
                 let models = config::load();
                 self.token_set = models.token_set;
-                self.token.update(cx, |field, cx| field.emplace("", cx));
+                if clear_token {
+                    self.token.update(cx, |field, cx| field.emplace("", cx));
+                }
+                self.laya_status = plugins::laya_status(&plugins.laya_path);
+                self.bonsai_status = plugins::bonsai_status(&plugins.bonsai_path);
                 self.toast = Some("Saved config.yaml".into());
             }
             Err(err) => self.toast = Some(err),
         }
         cx.notify();
+    }
+
+    fn toggle_plugin(&mut self, dsm: bool, cx: &mut Context<Self>) {
+        if dsm {
+            self.dsm_on = !self.dsm_on;
+            if !self.dsm_on && self.pane == Pane::Profile {
+                self.pane = Pane::Cue;
+            }
+        } else {
+            self.fallacies_on = !self.fallacies_on;
+            if !self.fallacies_on && self.pane == Pane::Fallacies {
+                self.pane = Pane::Cue;
+            }
+        }
+        self.persist(cx, false);
+    }
+
+    fn run_fallacies(&mut self, cx: &mut Context<Self>) {
+        if !self.fallacies_on {
+            self.toast = Some("Fallacies plugin is off.".into());
+            cx.notify();
+            return;
+        }
+        let Some(recording) = self.current().cloned() else {
+            self.toast = Some("Open a recording first.".into());
+            cx.notify();
+            return;
+        };
+        if self.busy {
+            return;
+        }
+        let settings = self.plugin_settings(cx);
+        self.busy = true;
+        self.toast = Some("Reading the session with Laya…".into());
+        cx.notify();
+        self.job = Some(cx.spawn(async move |this, async_cx| {
+            let result = async_cx
+                .background_spawn(async move {
+                    plugins::analyze_fallacies_live(&recording, settings.fallacies, &settings.laya_path, &settings.laya_command)
+                })
+                .await;
+            this.update(async_cx, |this, cx| {
+                this.busy = false;
+                match result {
+                    Ok((note, hits)) => {
+                        this.toast = Some(note.summary.clone());
+                        this.plugin_note = Some(note.summary);
+                        this.laya_status = plugins::laya_status(&this.laya_path.read(cx).as_str());
+                        if !hits.is_empty() {
+                            this.fallacy_hits = hits;
+                        } else {
+                            this.fallacy_hits = this.current().map(|recording| plugins::read_hits(&recording.dir)).unwrap_or_default();
+                        }
+                        this.reload_library();
+                    }
+                    Err(err) => {
+                        this.toast = Some(err.clone());
+                        this.plugin_note = Some(err);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    fn run_profiles(&mut self, cx: &mut Context<Self>) {
+        if !self.dsm_on {
+            self.toast = Some("DSM-5 plugin is off.".into());
+            cx.notify();
+            return;
+        }
+        if self.busy {
+            return;
+        }
+        let settings = self.plugin_settings(cx);
+        let recordings = self.recordings.clone();
+        self.busy = true;
+        self.toast = Some("Building evidence profiles with Laya…".into());
+        cx.notify();
+        self.job = Some(cx.spawn(async move |this, async_cx| {
+            let result = async_cx
+                .background_spawn(async move {
+                    plugins::analyze_profiles_live(
+                        &recordings,
+                        settings.dsm,
+                        &settings.laya_path,
+                        &settings.laya_command,
+                        &settings.bonsai_path,
+                        &settings.bonsai_endpoint,
+                    )
+                })
+                .await;
+            this.update(async_cx, |this, cx| {
+                this.busy = false;
+                match result {
+                    Ok((note, profiles)) => {
+                        this.toast = Some(note.summary.clone());
+                        this.plugin_note = Some(note.summary);
+                        this.profiles = profiles;
+                        if this.profile_speaker.is_none() {
+                            this.profile_speaker = this.profiles.first().map(|profile| profile.speaker.clone());
+                        }
+                        this.reload_library();
+                    }
+                    Err(err) => {
+                        this.toast = Some(err.clone());
+                        this.plugin_note = Some(err);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    fn reload_library(&mut self) {
+        let selected = self.selected.clone();
+        self.recordings = library::load_library();
+        if let Some(id) = &selected {
+            if self.recordings.iter().any(|recording| &recording.id == id) {
+                self.selected = Some(id.clone());
+            }
+        }
+        self.profiles = plugins::read_profiles();
+    }
+
+    fn plugin_toggle(
+        &self,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        id: &'static str,
+        title: &'static str,
+        detail: &'static str,
+        on: bool,
+    ) -> gpui::Div {
+        let dsm = id == "plug-dsm";
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(detail)),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .h(px(28.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .bg(if on { theme.bone } else { theme.raised })
+                    .text_color(if on { theme.ink } else { theme.muted })
+                    .child(if on { "On" } else { "Off" })
+                    .on_click(move |_event, _window, cx| {
+                        app.update(cx, |this, cx| this.toggle_plugin(dsm, cx)).ok();
+                    }),
+            )
+    }
+
+    fn fallacy_pane(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> Stateful<gpui::Div> {
+        let run = app.clone();
+        let mut page = div()
+            .id("fallacy-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px(px(16.))
+            .pb(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(section_label(theme, "FALLACIES"))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .whitespace_normal()
+                    .child("Laya reads each turn in this session. A hit stays a draft until someone reviews it."),
+            )
+            .child(
+                div()
+                    .font_family("JetBrains Mono")
+                    .text_size(px(11.))
+                    .text_color(theme.faint)
+                    .whitespace_normal()
+                    .child(self.plugin_note.clone().unwrap_or_else(|| self.laya_status.clone())),
+            )
+            .child(text_button("run-fallacies", "Run on this session", run, theme, |this, cx| {
+                this.run_fallacies(cx);
+            }));
+        if self.fallacy_hits.is_empty() {
+            page = page.child(div().text_size(px(13.)).text_color(theme.muted).whitespace_normal().child("No fallacy findings for this session yet."));
+        }
+        for hit in &self.fallacy_hits {
+            page = page.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(theme.warn).child(hit.kind.clone()))
+                            .child(div().text_size(px(12.)).text_color(theme.faint).child(format!("{}  {:.0}%", hit.speaker, hit.noul * 100.0))),
+                    )
+                    .child(div().text_size(px(13.)).whitespace_normal().child(hit.quote.clone()))
+                    .child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(hit.label.clone())),
+            );
+        }
+        page
+    }
+
+    fn profile_pane(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> Stateful<gpui::Div> {
+        let run = app.clone();
+        let chosen = self
+            .profiles
+            .iter()
+            .find(|profile| Some(profile.speaker.as_str()) == self.profile_speaker.as_deref())
+            .or_else(|| self.profiles.first());
+        let mut page = div()
+            .id("profile-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px(px(16.))
+            .pb(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(section_label(theme, "DSM-5"))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .whitespace_normal()
+                    .child("Laya scores evidence themes for each speaker label across the library. Bonsai can correlate those themes. This is not a diagnosis."),
+            )
+            .child(
+                div()
+                    .font_family("JetBrains Mono")
+                    .text_size(px(11.))
+                    .text_color(theme.faint)
+                    .whitespace_normal()
+                    .child(self.plugin_note.clone().unwrap_or_else(|| self.laya_status.clone())),
+            )
+            .child(text_button("run-profiles", "Update profiles", run, theme, |this, cx| {
+                this.run_profiles(cx);
+            }));
+        let mut row = div().flex().flex_wrap().gap(px(6.));
+        for profile in &self.profiles {
+            let speaker = profile.speaker.clone();
+            let on = chosen.map(|item| item.speaker.as_str()) == Some(profile.speaker.as_str());
+            let app = app.clone();
+            row = row.child(
+                div()
+                    .id(format!("profile-{}", profile.slug))
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .bg(if on { theme.bone } else { theme.raised })
+                    .text_color(if on { theme.ink } else { theme.muted })
+                    .child(profile.speaker.clone())
+                    .on_click(move |_event, _window, cx| {
+                        let speaker = speaker.clone();
+                        app.update(cx, |this, cx| {
+                            this.profile_speaker = Some(speaker);
+                            cx.notify();
+                        })
+                        .ok();
+                    }),
+            );
+        }
+        page = page.child(row);
+        if let Some(profile) = chosen {
+            page = page.child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(profile.speaker.clone()));
+            for theme_score in &profile.themes {
+                page = page.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .gap(px(8.))
+                        .child(div().text_size(px(13.)).child(theme_score.label.clone()))
+                        .child(
+                            div()
+                                .font_family("JetBrains Mono")
+                                .text_size(px(12.))
+                                .text_color(theme.muted)
+                                .child(format!("{:.2}", theme_score.score)),
+                        ),
+                );
+            }
+            page = page.child(section_label(theme, "SESSIONS"));
+            for session in &profile.sessions {
+                page = page.child(div().text_size(px(13.)).child(session.title.clone()));
+            }
+            page = page.child(section_label(theme, "CORRELATION"));
+            let correlation = if profile.correlation.is_empty() {
+                self.bonsai_status.clone()
+            } else {
+                profile.correlation.clone()
+            };
+            page = page.child(div().text_size(px(13.)).whitespace_normal().child(correlation));
+        } else {
+            page = page.child(div().text_size(px(13.)).text_color(theme.muted).whitespace_normal().child("No profiles yet. Update profiles after Laya is on disk."));
+        }
+        page
     }
 }
 
