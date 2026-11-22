@@ -1,0 +1,10 @@
+{
+  "id": "exchange",
+  "title": "Opening Exchange",
+  "detail": "Sample speaker track \u00b7 three voices",
+  "source": "../../tests/data/jfk-rmn.mp3",
+  "srt": "captions.srt",
+  "duration_ms": 971911,
+  "order": 2,
+  "sample": true
+}

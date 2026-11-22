@@ -1,0 +1,9 @@
+{
+  "id": "ask-not",
+  "title": "Ask Not",
+  "detail": "John F. Kennedy \u00b7 20 January 1961",
+  "source": "../../tests/data/jfk.wav",
+  "srt": "captions.srt",
+  "duration_ms": 11000,
+  "order": 1
+}

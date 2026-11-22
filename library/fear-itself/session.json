@@ -1,0 +1,9 @@
+{
+  "id": "fear-itself",
+  "title": "Fear Itself",
+  "detail": "Franklin D. Roosevelt \u00b7 4 March 1933",
+  "source": "../../tests/data/fdr.mp3",
+  "srt": "captions.srt",
+  "duration_ms": 1241026,
+  "order": 0
+}
