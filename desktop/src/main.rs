@@ -1,4 +1,9 @@
+mod audio;
+mod config;
+mod gguf;
 mod library;
+mod okf;
+mod plugins;
 mod srt;
 mod studio;
 mod theme;
@@ -11,8 +16,10 @@ fn main() {
         .run(|cx: &mut App| {
             studio::bind_keys(cx);
             let bounds = Bounds::centered(None, size(px(1520.), px(940.)), cx);
+            let mut options = WindowOptions::default().window_bounds(WindowBounds::Windowed(bounds));
+            options.window_min_size = Some(size(px(160.), px(160.)));
             cx.open_window(
-                WindowOptions::default().window_bounds(WindowBounds::Windowed(bounds)),
+                options,
                 |window, cx| cx.new(|cx| studio::Studio::new(window, cx)),
             )
             .unwrap();

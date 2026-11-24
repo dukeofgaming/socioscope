@@ -4,6 +4,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
+use crate::okf::{self, Bundle};
 use crate::srt::{self, Cue};
 
 #[derive(Clone, Debug)]
@@ -19,6 +20,8 @@ pub struct Recording {
     pub sample: bool,
     pub order: i32,
     pub from_pipeline: bool,
+    pub bundle: Bundle,
+    pub dir: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +109,7 @@ pub fn import_srt(source: &Path) -> Result<String, String> {
         serde_json::to_string_pretty(&session).map_err(|err| err.to_string())? + "\n",
     )
     .map_err(|err| err.to_string())?;
+    okf::seed(&dir, &title, "Imported captions").map_err(|err| err.to_string())?;
     Ok(slug)
 }
 
@@ -198,6 +202,8 @@ fn load_session(dir: &Path, session_path: &Path) -> Option<Recording> {
         sample: session.sample,
         order: session.order.unwrap_or(50),
         from_pipeline,
+        bundle: okf::load(dir),
+        dir: dir.to_path_buf(),
     })
 }
 

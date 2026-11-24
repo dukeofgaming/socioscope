@@ -12,6 +12,21 @@ from socioscope import messages
 
 supported_audio_formats = (".wav", ".m4a", ".mp3")
 
+def transcription_model(config):
+    models = (config.get("models") or {}).get("transcription") or {}
+    path = models.get("path")
+    if path:
+        return path
+    return (config.get("transcription") or {}).get("model")
+
+def diarization_model(config):
+    models = (config.get("models") or {}).get("diarization") or {}
+    model_id = models.get("id")
+    if model_id:
+        return model_id
+    legacy = (config.get("diarization") or {}).get("model")
+    return legacy or "pyannote/speaker-diarization-3.1"
+
 def get_output_directory_path(file_path):
     return os.path.join(
         os.path.dirname(file_path),
@@ -89,7 +104,7 @@ def run_whisper(file_path, output_directory_path):
     subprocess.run([
         'whisper-cpp',          # Path to the compiled whisper-cpp executable
         '--threads', '16',      # TODO: Parametrize, but default to max available
-        '--model', config['transcription']['model'],   #'/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
+        '--model', transcription_model(config),   #'/Users/david/Projects/socioscope/tests/.models/ggml-base.en.bin',     # Model file path
         '--file', file_path if file_extension == '.wav' else f"{output_directory_path}/converted.wav",                                        # Input audio file path
         '--output-file', f"{output_directory_path}/transcription",      # Output file path
         # '--output-csv',                                                  # Output format
@@ -126,7 +141,7 @@ def diarization(file_path):
 
     print("Diarization: preparing pipeline")
     pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
+        diarization_model(config),
         use_auth_token=huggingface_token
     )
 

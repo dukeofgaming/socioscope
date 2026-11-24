@@ -1,4 +1,32 @@
-huggingface_token: "<huggingface token used for downloading diarization model>"
+huggingface_token: "<huggingface token used for downloading the diarization model>"
 
 transcription:
-  model: "<absolute path to the diarization model>"
+  model: "<path to the whisper.cpp ggml model>"
+
+diarization:
+  model: "pyannote/speaker-diarization-3.1"
+
+# The studio edits this file from Config. Both shapes stay in sync.
+models:
+  transcription:
+    name: Whisper
+    engine: whisper.cpp
+    path: "<path to the whisper.cpp ggml model>"
+  diarization:
+    name: pyannote speaker diarization
+    engine: pyannote.audio
+    id: "pyannote/speaker-diarization-3.1"
+
+plugins:
+  fallacies:
+    enabled: true
+  dsm:
+    enabled: true
+
+engines:
+  laya:
+    path: ""
+    command: laya
+  bonsai:
+    path: ""
+    endpoint: ""

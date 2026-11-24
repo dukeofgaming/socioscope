@@ -13,5 +13,6 @@ path = "src/main.rs"
 gpui = { package = "gpui-ce", version = "0.3" }
 gpui_ce_elements = "0.3"
 gpui_platform = { package = "gpui_ce_platform", version = "0.3", features = ["x11", "wayland"] }
+rodio = { version = "0.23", default-features = false, features = ["playback", "mp3", "wav", "mp4"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -10,7 +10,11 @@ use gpui_ce_elements::editable_text::{
 };
 use gpui_ce_elements::editable_text::actions::DEFAULT_INPUT_CONTEXT;
 
+use crate::audio;
+use crate::config::{self, PluginSettings};
 use crate::library::{self, Recording};
+use crate::okf::Concept;
+use crate::plugins::{self, FallacyHit, Profile};
 use crate::srt::{self, Cue};
 use crate::theme::{self, Theme, speaker_color, with_alpha};
 
@@ -27,12 +31,52 @@ gpui::actions!(
 
 const ROW: f32 = 36.0;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fit {
+    Desk,
+    Tablet,
+    Phone,
+    Watch,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Session,
+    Library,
+    Cue,
+    Package,
+    Models,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Cue,
+    File,
+    Package,
+    Fallacies,
+    Profile,
+}
+
+fn fit_for(width: f32, height: f32) -> Fit {
+    if width < 300.0 || (width < 420.0 && height < 280.0) {
+        Fit::Watch
+    } else if width < 700.0 {
+        Fit::Phone
+    } else if width < 1180.0 {
+        Fit::Tablet
+    } else {
+        Fit::Desk
+    }
+}
+
 pub struct Studio {
     recordings: Vec<Recording>,
     selected: Option<String>,
     playhead: f64,
     playing: bool,
     speed: f64,
+    audio: audio::Output,
+    audio_note: Option<String>,
     follow: bool,
     zoom_ms: Option<f64>,
     origin: f64,
@@ -40,8 +84,26 @@ pub struct Studio {
     speaker: Option<String>,
     picked: Option<usize>,
     tracked: Option<usize>,
-    file_tab: bool,
+    pane: Pane,
+    screen: Screen,
+    concept: Option<String>,
     query: Entity<EditableTextState>,
+    whisper: Entity<EditableTextState>,
+    diarize: Entity<EditableTextState>,
+    token: Entity<EditableTextState>,
+    token_set: bool,
+    fallacies_on: bool,
+    dsm_on: bool,
+    laya_path: Entity<EditableTextState>,
+    laya_command: String,
+    bonsai_path: Entity<EditableTextState>,
+    bonsai_endpoint: Entity<EditableTextState>,
+    laya_status: String,
+    bonsai_status: String,
+    fallacy_hits: Vec<FallacyHit>,
+    profiles: Vec<Profile>,
+    profile_speaker: Option<String>,
+    plugin_note: Option<String>,
     focus: FocusHandle,
     sheet: ScrollHandle,
     toast: Option<String>,
@@ -66,18 +128,37 @@ pub fn bind_keys(cx: &mut App) {
 
 impl Studio {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let models = config::load();
+        let plugins = config::load_plugins();
         let query = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
+        let whisper = cx.new(|cx| EditableTextState::new(StringStorage::from(models.whisper_path.clone()), cx));
+        let diarize = cx.new(|cx| EditableTextState::new(StringStorage::from(models.diarization_id.clone()), cx));
+        let token = cx.new(|cx| EditableTextState::new(StringStorage::default(), cx));
+        let laya_path = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.laya_path.clone()), cx));
+        let bonsai_path = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.bonsai_path.clone()), cx));
+        let bonsai_endpoint = cx.new(|cx| EditableTextState::new(StringStorage::from(plugins.bonsai_endpoint.clone()), cx));
         let subscription = cx.subscribe(&query, |_, _, _: &TextChanged, cx| cx.notify());
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
         let recordings = library::load_library();
         let selected = recordings.first().map(|recording| recording.id.clone());
+        let fallacy_hits = selected
+            .as_ref()
+            .and_then(|id| recordings.iter().find(|recording| &recording.id == id))
+            .map(|recording| plugins::read_hits(&recording.dir))
+            .unwrap_or_default();
+        let profiles = plugins::read_profiles();
+        let profile_speaker = profiles.first().map(|profile| profile.speaker.clone());
+        let laya_status = plugins::laya_status(&plugins.laya_path);
+        let bonsai_status = plugins::bonsai_status(&plugins.bonsai_path);
         Self {
             recordings,
             selected,
             playhead: 0.0,
             playing: false,
             speed: 1.0,
+            audio: audio::Output::start(),
+            audio_note: None,
             follow: true,
             zoom_ms: Some(90_000.0),
             origin: 0.0,
@@ -85,8 +166,26 @@ impl Studio {
             speaker: None,
             picked: None,
             tracked: None,
-            file_tab: false,
+            pane: Pane::Cue,
+            screen: Screen::Session,
+            concept: None,
             query,
+            whisper,
+            diarize,
+            token,
+            token_set: models.token_set,
+            fallacies_on: plugins.fallacies,
+            dsm_on: plugins.dsm,
+            laya_path,
+            laya_command: plugins.laya_command,
+            bonsai_path,
+            bonsai_endpoint,
+            laya_status,
+            bonsai_status,
+            fallacy_hits,
+            profiles,
+            profile_speaker,
+            plugin_note: None,
             focus,
             sheet: ScrollHandle::new(),
             toast: None,
@@ -128,17 +227,33 @@ impl Studio {
     }
 
     fn tick(&mut self, window: &mut Window) {
+        if let Some(err) = self.audio.take_error() {
+            self.audio_note = Some(err.clone());
+            self.toast = Some(err);
+        } else if self.audio.ready() && !self.audio.failed() {
+            self.audio_note = None;
+        }
         if !self.playing {
             return;
         }
-        let now = Instant::now();
-        let dt = now.saturating_duration_since(self.last_tick).as_secs_f64().min(0.1);
-        self.last_tick = now;
         let duration = self.duration();
-        self.playhead = (self.playhead + dt * 1000.0 * self.speed).min(duration);
-        if self.playhead >= duration {
-            self.playing = false;
-            return;
+        let has_audio = self.current().and_then(|recording| recording.source.as_ref()).is_some();
+        if has_audio && !self.audio.failed() {
+            if self.audio.ended() {
+                self.playing = false;
+                self.playhead = duration;
+                return;
+            }
+            self.playhead = (self.audio.position_ms() as f64).min(duration);
+        } else {
+            let now = Instant::now();
+            let dt = now.saturating_duration_since(self.last_tick).as_secs_f64().min(0.1);
+            self.last_tick = now;
+            self.playhead = (self.playhead + dt * 1000.0 * self.speed).min(duration);
+            if self.playhead >= duration {
+                self.playing = false;
+                return;
+            }
         }
         if self.follow {
             self.reveal(self.playhead);
@@ -194,35 +309,85 @@ impl Studio {
         self.sheet.scroll_to_item(index);
     }
 
-    fn search_focused(&self, window: &Window, cx: &App) -> bool {
-        self.query.read(cx).focus_handle(cx).is_focused(window)
+    fn editing(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.query,
+            &self.whisper,
+            &self.diarize,
+            &self.token,
+            &self.laya_path,
+            &self.bonsai_path,
+            &self.bonsai_endpoint,
+        ]
+            .iter()
+            .any(|field| field.read(cx).focus_handle(cx).is_focused(window))
     }
 
     fn toggle_play(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.search_focused(window, cx) || self.duration() <= 0.0 {
+        if self.editing(window, cx) || self.duration() <= 0.0 {
             return;
         }
-        self.playing = !self.playing;
-        self.last_tick = Instant::now();
-        if self.playing && self.playhead >= self.duration() {
+        self.set_playing(!self.playing, cx);
+    }
+
+    fn set_playing(&mut self, playing: bool, cx: &mut Context<Self>) {
+        if self.duration() <= 0.0 {
+            return;
+        }
+        if playing && self.playhead >= self.duration() {
             self.playhead = 0.0;
             self.origin = 0.0;
         }
+        self.playing = playing;
+        self.last_tick = Instant::now();
+        self.sync_audio(true);
         cx.notify();
+    }
+
+    fn set_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
+        self.speed = speed;
+        if self.playing {
+            self.sync_audio(true);
+        }
+        cx.notify();
+    }
+
+    fn sync_audio(&mut self, seek: bool) {
+        let Some(path) = self.current().and_then(|recording| recording.source.clone()) else {
+            self.audio.stop();
+        if self.playing {
+            let note = "This recording has no audio file.".to_string();
+            self.toast = Some(note.clone());
+            self.audio_note = Some(note);
+        }
+        return;
+    };
+    if self.playing {
+        self.audio_note = None;
+    }
+    self.audio.cue(&path, self.playhead.max(0.0) as u64, self.speed as f32, self.playing, seek);
     }
 
     fn choose(&mut self, id: &str, cx: &mut Context<Self>) {
         self.selected = Some(id.to_string());
         self.playing = false;
+        self.audio.stop();
+        self.audio_note = None;
         self.picked = None;
         self.tracked = None;
         self.speaker = None;
+        self.screen = Screen::Session;
+        self.concept = None;
         self.origin = 0.0;
         self.playhead = self
             .current()
             .and_then(|recording| recording.cues.first().map(|cue| cue.start_ms as f64))
             .unwrap_or(0.0);
         self.sheet.scroll_to_top_of_item(0);
+        self.fallacy_hits = self
+            .current()
+            .map(|recording| plugins::read_hits(&recording.dir))
+            .unwrap_or_default();
         cx.notify();
     }
 
@@ -249,6 +414,9 @@ impl Studio {
         self.playhead = ms.clamp(0.0, self.duration());
         self.reveal(self.playhead);
         self.tracked = None;
+        if self.playing {
+            self.sync_audio(true);
+        }
         cx.notify();
     }
 
@@ -406,7 +574,7 @@ impl Render for Studio {
         let query = self.query.read(cx).as_str().to_string();
         let app = cx.weak_entity();
 
-        div()
+        let mut shell = div()
             .id("studio")
             .size_full()
             .flex()
@@ -419,38 +587,339 @@ impl Render for Studio {
             .key_context("Socioscope")
             .on_action(cx.listener(|this, _: &TogglePlay, window, cx| this.toggle_play(window, cx)))
             .on_action(cx.listener(|this, _: &PreviousCue, window, cx| {
-                if !this.search_focused(window, cx) {
+                if !this.editing(window, cx) {
                     this.step_cue(-1, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &NextCue, window, cx| {
-                if !this.search_focused(window, cx) {
+                if !this.editing(window, cx) {
                     this.step_cue(1, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &PreviousRecording, window, cx| {
-                if !this.search_focused(window, cx) {
+                if !this.editing(window, cx) {
                     this.step_recording(-1, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &NextRecording, window, cx| {
-                if !this.search_focused(window, cx) {
+                if !this.editing(window, cx) {
                     this.step_recording(1, cx);
                 }
-            }))
-            .child(self.sidebar(&query, app.clone(), theme, cx))
-            .child(self.stage(&query, app.clone(), theme, cx))
-            .child(self.inspector(app, theme, cx))
+            }));
+
+        let width = window.viewport_size().width.as_f32();
+        let fit = fit_for(width, window.viewport_size().height.as_f32());
+        match fit {
+            Fit::Watch => shell = shell.child(self.watch(app, theme)),
+            Fit::Phone => shell = shell.child(self.phone(&query, app, theme, cx)),
+            Fit::Tablet if width < 980.0 => shell = shell.child(self.tablet(&query, app, theme, cx)),
+            Fit::Tablet => {
+                let inspector = if self.screen == Screen::Models { None } else { Some(280.0) };
+                shell = shell.child(self.columns(&query, app, theme, cx, 200.0, inspector, true));
+            }
+            Fit::Desk => {
+                let inspector = if self.screen == Screen::Models { None } else { Some(320.0) };
+                shell = shell.child(self.columns(&query, app, theme, cx, 260.0, inspector, false));
+            }
+        }
+        shell
     }
 }
 
 impl Studio {
+    fn columns(
+        &self,
+        query: &str,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        cx: &mut Context<Self>,
+        sidebar: f32,
+        inspector: Option<f32>,
+        slim: bool,
+    ) -> gpui::Div {
+        let main = if self.screen == Screen::Models {
+            self.models_page(app.clone(), theme, cx)
+        } else {
+            self.stage(query, app.clone(), theme, cx, slim)
+        };
+        let mut row = div()
+            .size_full()
+            .flex()
+            .child(self.sidebar(query, app.clone(), theme, cx, sidebar))
+            .child(main);
+        if let Some(width) = inspector {
+            row = row.child(self.inspector(app, theme, Some(width)));
+        }
+        row
+    }
+
+    fn tablet(
+        &self,
+        query: &str,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let frame = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(self.section_switch(app.clone(), theme, false));
+        let frame = match self.screen {
+            Screen::Cue => frame.child(self.inspector(app.clone(), theme, None)),
+            Screen::Package => frame.child(package_page(self.current(), self.concept.as_deref(), app.clone(), theme)),
+            Screen::Models => frame.child(self.models_page(app.clone(), theme, cx)),
+            _ => frame.child(self.stage(query, app.clone(), theme, cx, true)),
+        };
+        div()
+            .size_full()
+            .flex()
+            .child(self.sidebar(query, app, theme, cx, 188.0))
+            .child(frame)
+    }
+
+    fn phone(
+        &self,
+        query: &str,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let page = div().flex_1().min_h_0().min_w_0();
+        let page = match self.screen {
+            Screen::Library => page.child(self.library_page(query, app.clone(), theme, cx)),
+            Screen::Cue => page.child(self.inspector(app.clone(), theme, None)),
+            Screen::Package => page.child(package_page(self.current(), self.concept.as_deref(), app.clone(), theme)),
+            Screen::Models => page.child(self.models_page(app.clone(), theme, cx)),
+            Screen::Session => page.child(self.stage(query, app.clone(), theme, cx, true)),
+        };
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(page)
+            .child(self.bottom_nav(app, theme))
+    }
+
+    fn watch(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> gpui::Div {
+        if self.screen == Screen::Library {
+            return self.watch_library(app, theme);
+        }
+        let recording = self.current();
+        let title = recording.map(|recording| recording.title.clone()).unwrap_or_else(|| "Socioscope".into());
+        let caption = recording
+            .and_then(|recording| {
+                let index = self.inspected()?;
+                recording.cues.get(index).map(|cue| cue.plain())
+            })
+            .unwrap_or_else(|| "No caption".into());
+        let play = app.clone();
+        let library = app.clone();
+        let next = app.clone();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.bg)
+            .p(px(8.))
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .truncate()
+                    .child(title),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .text_size(px(13.))
+                    .whitespace_normal()
+                    .line_clamp(5)
+                    .child(caption),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(transport_button(
+                        "watch-play",
+                        if self.playing { "Pause" } else { "Play" },
+                        play,
+                        theme,
+                        |this, cx| {
+                            this.set_playing(!this.playing, cx);
+                        },
+                    ))
+                    .child(
+                        div()
+                            .font_family("JetBrains Mono")
+                            .text_size(px(11.))
+                            .child(srt::transport_clock(self.playhead)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(text_button("watch-library", "Library", library, theme, |this, cx| {
+                        this.screen = Screen::Library;
+                        cx.notify();
+                    }))
+                    .child(text_button("watch-next", "Next", next, theme, |this, cx| {
+                        this.step_cue(1, cx);
+                    })),
+            )
+    }
+
+    fn watch_library(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> gpui::Div {
+        let mut list = div().id("watch-list").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap(px(2.));
+        for recording in &self.recordings {
+            let id = recording.id.clone();
+            let app = app.clone();
+            let on = self.selected.as_deref() == Some(recording.id.as_str());
+            list = list.child(
+                div()
+                    .id(format!("watch-{id}"))
+                    .px(px(6.))
+                    .py(px(4.))
+                    .rounded(px(4.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .truncate()
+                    .bg(if on { theme.raised } else { theme.bg })
+                    .child(recording.title.clone())
+                    .on_click(move |_event, _window, cx| {
+                        app.update(cx, |this, cx| this.choose(&id, cx)).ok();
+                    }),
+            );
+        }
+        let back = app.clone();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.bg)
+            .p(px(8.))
+            .gap(px(6.))
+            .child(div().text_size(px(10.)).text_color(theme.faint).child("LIBRARY"))
+            .child(list)
+            .child(text_button("watch-back", "Back", back, theme, |this, cx| {
+                this.screen = Screen::Session;
+                cx.notify();
+            }))
+    }
+
+    fn library_page(
+        &self,
+        query: &str,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.sidebar(query, app, theme, cx, 10_000.0)
+            .w_full()
+            .flex_1()
+            .min_h_0()
+            .border_r_0()
+    }
+
+    fn bottom_nav(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> gpui::Div {
+        div()
+            .h(px(48.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(px(6.))
+            .bg(theme.bg)
+            .border_t_1()
+            .border_color(theme.line)
+            .child(self.nav_item("nav-library", "Library", Screen::Library, app.clone(), theme))
+            .child(self.nav_item("nav-play", "Play", Screen::Session, app.clone(), theme))
+            .child(self.nav_item("nav-cue", "Cue", Screen::Cue, app.clone(), theme))
+            .child(self.nav_item("nav-pack", "Pack", Screen::Package, app.clone(), theme))
+            .child(self.nav_item("nav-models", "Models", Screen::Models, app, theme))
+    }
+
+    fn nav_item(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        screen: Screen,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+    ) -> Stateful<gpui::Div> {
+        let on = self.screen == screen;
+        div()
+            .id(id)
+            .flex_1()
+            .h(px(36.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .cursor_pointer()
+            .text_size(px(11.))
+            .font_weight(if on { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+            .text_color(if on { theme.ink } else { theme.muted })
+            .bg(if on { theme.bone } else { theme.bg })
+            .child(label)
+            .on_click(move |_event, _window, cx| {
+                app.update(cx, |this, cx| {
+                    this.screen = screen;
+                    cx.notify();
+                })
+                .ok();
+            })
+    }
+
+    fn section_switch(&self, app: gpui::WeakEntity<Self>, theme: Theme, include_library: bool) -> gpui::Div {
+        let mut row = div()
+            .px(px(12.))
+            .pt(px(8.))
+            .pb(px(4.))
+            .flex()
+            .gap(px(6.))
+            .flex_none();
+        if include_library {
+            row = row.child(self.nav_chip("switch-library", "Library", Screen::Library, app.clone(), theme));
+        }
+        row.child(self.nav_chip("switch-session", "Session", Screen::Session, app.clone(), theme))
+            .child(self.nav_chip("switch-cue", "Cue", Screen::Cue, app.clone(), theme))
+            .child(self.nav_chip("switch-package", "Package", Screen::Package, app.clone(), theme))
+            .child(self.nav_chip("switch-models", "Models", Screen::Models, app, theme))
+    }
+
+    fn nav_chip(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        screen: Screen,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+    ) -> Stateful<gpui::Div> {
+        let on = self.screen == screen || (screen == Screen::Session && self.screen == Screen::Library);
+        chip(id, label, on, theme).on_click(move |_event, _window, cx| {
+            app.update(cx, |this, cx| {
+                this.screen = screen;
+                cx.notify();
+            })
+            .ok();
+        })
+    }
+
     fn sidebar(
         &self,
         query: &str,
         app: gpui::WeakEntity<Self>,
         theme: Theme,
         cx: &mut Context<Self>,
+        width: f32,
     ) -> gpui::Div {
         let visible = self.visible(query);
         let mut list = div()
@@ -530,7 +999,8 @@ impl Studio {
 
         let import = app.clone();
         div()
-            .w(px(260.))
+            .w(px(width))
+            .max_w_full()
             .h_full()
             .flex()
             .flex_col()
@@ -551,7 +1021,7 @@ impl Studio {
                     .child("LIBRARY"),
             )
             .child(list)
-            .child(sidebar_footer(import, theme, self.toast.clone()))
+            .child(sidebar_footer(import, app, theme, self.toast.clone(), self.screen == Screen::Models))
     }
 
     fn brand(&self, theme: Theme) -> gpui::Div {
@@ -614,6 +1084,7 @@ impl Studio {
         app: gpui::WeakEntity<Self>,
         theme: Theme,
         _cx: &mut Context<Self>,
+        slim: bool,
     ) -> gpui::Div {
         let Some(recording) = self.current() else {
             return empty_stage(theme);
@@ -631,9 +1102,9 @@ impl Studio {
             .flex()
             .flex_col()
             .bg(theme.stage)
-            .child(stage_header(recording, theme))
-            .child(monitor(recording, inspected, self.playhead, theme))
-            .child(self.transport(app.clone(), theme))
+            .child(stage_header(recording, theme, slim))
+            .child(monitor(recording, inspected, self.playhead, theme, if slim { 176.0 } else { 228.0 }))
+            .child(self.transport(app.clone(), theme, slim))
             .child(timeline(
                 recording,
                 origin,
@@ -643,6 +1114,7 @@ impl Studio {
                 self.picked,
                 app.clone(),
                 theme,
+                slim,
             ))
             .child(cue_sheet(
                 recording,
@@ -652,10 +1124,11 @@ impl Studio {
                 &self.sheet,
                 app,
                 theme,
+                slim,
             ))
     }
 
-    fn transport(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> gpui::Div {
+    fn transport(&self, app: gpui::WeakEntity<Self>, theme: Theme, slim: bool) -> gpui::Div {
         let duration = self.duration();
         let play = app.clone();
         let previous = app.clone();
@@ -663,9 +1136,11 @@ impl Studio {
         let follow = app.clone();
         let follow_on = self.follow;
         let mut row = div()
-            .h(px(48.))
-            .px(px(20.))
+            .min_h(px(if slim { 40.0 } else { 48.0 }))
+            .px(px(if slim { 12.0 } else { 20.0 }))
+            .py(px(6.))
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(8.))
             .border_b_1()
@@ -679,13 +1154,7 @@ impl Studio {
                 play,
                 theme,
                 |this, cx| {
-                    this.playing = !this.playing;
-                    this.last_tick = Instant::now();
-                    if this.playing && this.playhead >= this.duration() {
-                        this.playhead = 0.0;
-                        this.origin = 0.0;
-                    }
-                    cx.notify();
+                    this.set_playing(!this.playing, cx);
                 },
             ))
             .child(transport_button("cue-next", "Next", next, theme, |this, cx| {
@@ -698,6 +1167,15 @@ impl Studio {
                     .text_size(px(13.))
                     .child(srt::transport_clock(self.playhead)),
             )
+            .when_some(self.audio_note.clone(), |row, note| {
+                row.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.warn)
+                        .truncate()
+                        .child(note),
+                )
+            })
             .child(
                 div()
                     .font_family("JetBrains Mono")
@@ -705,17 +1183,17 @@ impl Studio {
                     .text_color(theme.faint)
                     .child(format!("/  {}", srt::transport_clock(duration))),
             )
-            .child(div().flex_1());
+            .child(div().flex_1().min_w(px(8.)));
+
+        if slim {
+            return row;
+        }
 
         for (id, label, value) in [("s08", "0.8×", 0.8), ("s10", "1×", 1.0), ("s12", "1.25×", 1.25), ("s15", "1.5×", 1.5)] {
             let app = app.clone();
             let on = (self.speed - value).abs() < 0.01;
             row = row.child(chip(id, label, on, theme).on_click(move |_event, _window, cx| {
-                app.update(cx, |this, cx| {
-                    this.speed = value;
-                    cx.notify();
-                })
-                .ok();
+                app.update(cx, |this, cx| this.set_speed(value, cx)).ok();
             }));
         }
         row = row.child(chip("follow", "Follow", follow_on, theme).on_click(move |_event, _window, cx| {
@@ -746,44 +1224,552 @@ impl Studio {
         row
     }
 
-    fn inspector(&self, app: gpui::WeakEntity<Self>, theme: Theme, _cx: &mut Context<Self>) -> gpui::Div {
+    fn inspector(&self, app: gpui::WeakEntity<Self>, theme: Theme, width: Option<f32>) -> gpui::Div {
         let recording = self.current().cloned();
-        let mut panel = div()
-            .w(px(320.))
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .bg(theme.bg)
-            .border_l_1()
-            .border_color(theme.line);
+        let mut panel = div().h_full().flex().flex_col().bg(theme.bg);
+        panel = if let Some(width) = width {
+            panel.w(px(width)).flex_none().border_l_1().border_color(theme.line)
+        } else {
+            panel.flex_1().min_w_0().min_h_0()
+        };
         let cue_tab = app.clone();
         let file_tab = app.clone();
-        panel = panel.child(
-            div()
-                .px(px(16.))
-                .pt(px(14.))
-                .pb(px(10.))
-                .flex()
-                .gap(px(6.))
-                .child(chip("tab-cue", "Cue", !self.file_tab, theme).on_click(move |_e, _w, cx| {
-                    cue_tab.update(cx, |this, cx| {
-                        this.file_tab = false;
-                        cx.notify();
-                    }).ok();
-                }))
-                .child(chip("tab-file", "File", self.file_tab, theme).on_click(move |_e, _w, cx| {
-                    file_tab.update(cx, |this, cx| {
-                        this.file_tab = true;
-                        cx.notify();
-                    }).ok();
-                })),
-        );
-        if self.file_tab {
-            panel.child(file_panel(recording.as_ref(), &self.log, self.busy, app, theme))
-        } else {
-            panel.child(cue_panel(recording.as_ref(), self.inspected(), theme))
+        let package_tab = app.clone();
+        let fallacy_tab = app.clone();
+        let profile_tab = app.clone();
+        let mut tabs = div()
+            .px(px(12.))
+            .pt(px(12.))
+            .pb(px(8.))
+            .flex()
+            .flex_wrap()
+            .gap(px(6.))
+            .child(chip("tab-cue", "Cue", self.pane == Pane::Cue, theme).on_click(move |_e, _w, cx| {
+                cue_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Cue;
+                    cx.notify();
+                }).ok();
+            }))
+            .child(chip("tab-file", "File", self.pane == Pane::File, theme).on_click(move |_e, _w, cx| {
+                file_tab.update(cx, |this, cx| {
+                    this.pane = Pane::File;
+                    cx.notify();
+                }).ok();
+            }))
+            .child(chip("tab-package", "Package", self.pane == Pane::Package, theme).on_click(move |_e, _w, cx| {
+                package_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Package;
+                    cx.notify();
+                }).ok();
+            }));
+        if self.fallacies_on {
+            tabs = tabs.child(chip("tab-fallacies", "Fallacies", self.pane == Pane::Fallacies, theme).on_click(move |_e, _w, cx| {
+                fallacy_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Fallacies;
+                    cx.notify();
+                }).ok();
+            }));
         }
+        if self.dsm_on {
+            tabs = tabs.child(chip("tab-profile", "Profile", self.pane == Pane::Profile, theme).on_click(move |_e, _w, cx| {
+                profile_tab.update(cx, |this, cx| {
+                    this.pane = Pane::Profile;
+                    cx.notify();
+                }).ok();
+            }));
+        }
+        panel = panel.child(tabs);
+        let pane = match self.pane {
+            Pane::Fallacies if !self.fallacies_on => Pane::Cue,
+            Pane::Profile if !self.dsm_on => Pane::Cue,
+            other => other,
+        };
+        match pane {
+            Pane::File => panel.child(file_panel(recording.as_ref(), &self.log, self.busy, app, theme)),
+            Pane::Package => panel.child(package_page(recording.as_ref(), self.concept.as_deref(), app, theme)),
+            Pane::Fallacies => panel.child(self.fallacy_pane(app, theme)),
+            Pane::Profile => panel.child(self.profile_pane(app, theme)),
+            Pane::Cue => panel.child(cue_panel(recording.as_ref(), self.inspected(), theme)),
+        }
+    }
+
+    fn models_page(&self, app: gpui::WeakEntity<Self>, theme: Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let back = app.clone();
+        let save = app.clone();
+        let whisper = self.whisper.read(cx).as_str().to_string();
+        let diarize = self.diarize.read(cx).as_str().to_string();
+        let token_line = if self.token_set {
+            "A Hugging Face token is saved. Paste a new one only to replace it."
+        } else {
+            "No Hugging Face token yet. Diarization needs one to download the model."
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(theme.stage)
+            .child(
+                div()
+                    .px(px(20.))
+                    .pt(px(16.))
+                    .pb(px(8.))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).child("Config"))
+                    .child(text_button("config-back", "Session", back, theme, |this, cx| {
+                        this.screen = Screen::Session;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("config-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .px(px(20.))
+                    .pb(px(24.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(16.))
+                    .child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(
+                        "The studio and the local transcriber share config.yaml.",
+                    ))
+                    .child(section_label(theme, "MODELS"))
+                    .child(model_card(
+                        theme,
+                        "Transcription",
+                        "whisper.cpp",
+                        "model-whisper",
+                        &self.whisper,
+                        "Path to a ggml model",
+                        &config::whisper_status(&whisper),
+                    ))
+                    .child(model_card(
+                        theme,
+                        "Diarization",
+                        "pyannote.audio",
+                        "model-diarize",
+                        &self.diarize,
+                        "pyannote/speaker-diarization-3.1",
+                        if diarize.trim().is_empty() { "Model id is empty" } else { "Model id" },
+                    ))
+                    .child(section_label(theme, "ACCESS"))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted)
+                            .whitespace_normal()
+                            .child(token_line),
+                    )
+                    .child(model_field(theme, "model-token", &self.token, "Paste a token to replace the saved one"))
+                    .child(section_label(theme, "PLUGINS"))
+                    .child(self.plugin_toggle(app.clone(), theme, "plug-fallacies", "Fallacies", "One session. Laya scores each turn.", self.fallacies_on))
+                    .child(self.plugin_toggle(app.clone(), theme, "plug-dsm", "DSM-5", "Profiles across conversations. Evidence, not a diagnosis.", self.dsm_on))
+                    .child(section_label(theme, "ENGINES"))
+                    .child(model_card(
+                        theme,
+                        "Laya",
+                        "Decision model for both plugins",
+                        "model-laya",
+                        &self.laya_path,
+                        "Path to laya-f16.gguf",
+                        &self.laya_status,
+                    ))
+                    .child(model_card(
+                        theme,
+                        "Bonsai",
+                        "Optional correlation for profiles",
+                        "model-bonsai",
+                        &self.bonsai_path,
+                        "Path to a Bonsai GGUF",
+                        &self.bonsai_status,
+                    ))
+                    .child(model_field(theme, "model-bonsai-endpoint", &self.bonsai_endpoint, "http://127.0.0.1:8080"))
+                    .child(
+                        div()
+                            .id("save-config")
+                            .mt(px(4.))
+                            .h(px(32.))
+                            .px(px(14.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(6.))
+                            .bg(theme.bone)
+                            .text_color(theme.ink)
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .cursor_pointer()
+                            .child("Save config")
+                            .on_click(move |_event, _window, cx| {
+                                save.update(cx, |this, cx| this.save_models(cx)).ok();
+                            }),
+                    ),
+            )
+    }
+
+    fn save_models(&mut self, cx: &mut Context<Self>) {
+        self.persist(cx, true);
+    }
+
+    fn plugin_settings(&self, cx: &App) -> PluginSettings {
+        PluginSettings {
+            fallacies: self.fallacies_on,
+            dsm: self.dsm_on,
+            laya_path: self.laya_path.read(cx).as_str().to_string(),
+            laya_command: self.laya_command.clone(),
+            bonsai_path: self.bonsai_path.read(cx).as_str().to_string(),
+            bonsai_endpoint: self.bonsai_endpoint.read(cx).as_str().to_string(),
+        }
+    }
+
+    fn persist(&mut self, cx: &mut Context<Self>, clear_token: bool) {
+        let whisper = self.whisper.read(cx).as_str().to_string();
+        let diarize = self.diarize.read(cx).as_str().to_string();
+        let token = if clear_token { self.token.read(cx).as_str().to_string() } else { String::new() };
+        let plugins = self.plugin_settings(cx);
+        match config::save_studio(&whisper, &diarize, &token, &plugins) {
+            Ok(()) => {
+                let models = config::load();
+                self.token_set = models.token_set;
+                if clear_token {
+                    self.token.update(cx, |field, cx| field.emplace("", cx));
+                }
+                self.laya_status = plugins::laya_status(&plugins.laya_path);
+                self.bonsai_status = plugins::bonsai_status(&plugins.bonsai_path);
+                self.toast = Some("Saved config.yaml".into());
+            }
+            Err(err) => self.toast = Some(err),
+        }
+        cx.notify();
+    }
+
+    fn toggle_plugin(&mut self, dsm: bool, cx: &mut Context<Self>) {
+        if dsm {
+            self.dsm_on = !self.dsm_on;
+            if !self.dsm_on && self.pane == Pane::Profile {
+                self.pane = Pane::Cue;
+            }
+        } else {
+            self.fallacies_on = !self.fallacies_on;
+            if !self.fallacies_on && self.pane == Pane::Fallacies {
+                self.pane = Pane::Cue;
+            }
+        }
+        self.persist(cx, false);
+    }
+
+    fn run_fallacies(&mut self, cx: &mut Context<Self>) {
+        if !self.fallacies_on {
+            self.toast = Some("Fallacies plugin is off.".into());
+            cx.notify();
+            return;
+        }
+        let Some(recording) = self.current().cloned() else {
+            self.toast = Some("Open a recording first.".into());
+            cx.notify();
+            return;
+        };
+        if self.busy {
+            return;
+        }
+        let settings = self.plugin_settings(cx);
+        self.busy = true;
+        self.toast = Some("Reading the session with Laya…".into());
+        cx.notify();
+        self.job = Some(cx.spawn(async move |this, async_cx| {
+            let result = async_cx
+                .background_spawn(async move {
+                    plugins::analyze_fallacies_live(&recording, settings.fallacies, &settings.laya_path, &settings.laya_command)
+                })
+                .await;
+            this.update(async_cx, |this, cx| {
+                this.busy = false;
+                match result {
+                    Ok((note, hits)) => {
+                        this.toast = Some(note.summary.clone());
+                        this.plugin_note = Some(note.summary);
+                        this.laya_status = plugins::laya_status(&this.laya_path.read(cx).as_str());
+                        if !hits.is_empty() {
+                            this.fallacy_hits = hits;
+                        } else {
+                            this.fallacy_hits = this.current().map(|recording| plugins::read_hits(&recording.dir)).unwrap_or_default();
+                        }
+                        this.reload_library();
+                    }
+                    Err(err) => {
+                        this.toast = Some(err.clone());
+                        this.plugin_note = Some(err);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    fn run_profiles(&mut self, cx: &mut Context<Self>) {
+        if !self.dsm_on {
+            self.toast = Some("DSM-5 plugin is off.".into());
+            cx.notify();
+            return;
+        }
+        if self.busy {
+            return;
+        }
+        let settings = self.plugin_settings(cx);
+        let recordings = self.recordings.clone();
+        self.busy = true;
+        self.toast = Some("Building evidence profiles with Laya…".into());
+        cx.notify();
+        self.job = Some(cx.spawn(async move |this, async_cx| {
+            let result = async_cx
+                .background_spawn(async move {
+                    plugins::analyze_profiles_live(
+                        &recordings,
+                        settings.dsm,
+                        &settings.laya_path,
+                        &settings.laya_command,
+                        &settings.bonsai_path,
+                        &settings.bonsai_endpoint,
+                    )
+                })
+                .await;
+            this.update(async_cx, |this, cx| {
+                this.busy = false;
+                match result {
+                    Ok((note, profiles)) => {
+                        this.toast = Some(note.summary.clone());
+                        this.plugin_note = Some(note.summary);
+                        this.profiles = profiles;
+                        if this.profile_speaker.is_none() {
+                            this.profile_speaker = this.profiles.first().map(|profile| profile.speaker.clone());
+                        }
+                        this.reload_library();
+                    }
+                    Err(err) => {
+                        this.toast = Some(err.clone());
+                        this.plugin_note = Some(err);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    fn reload_library(&mut self) {
+        let selected = self.selected.clone();
+        self.recordings = library::load_library();
+        if let Some(id) = &selected {
+            if self.recordings.iter().any(|recording| &recording.id == id) {
+                self.selected = Some(id.clone());
+            }
+        }
+        self.profiles = plugins::read_profiles();
+    }
+
+    fn plugin_toggle(
+        &self,
+        app: gpui::WeakEntity<Self>,
+        theme: Theme,
+        id: &'static str,
+        title: &'static str,
+        detail: &'static str,
+        on: bool,
+    ) -> gpui::Div {
+        let dsm = id == "plug-dsm";
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(detail)),
+            )
+            .child(
+                div()
+                    .id(id)
+                    .h(px(28.))
+                    .px(px(10.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .bg(if on { theme.bone } else { theme.raised })
+                    .text_color(if on { theme.ink } else { theme.muted })
+                    .child(if on { "On" } else { "Off" })
+                    .on_click(move |_event, _window, cx| {
+                        app.update(cx, |this, cx| this.toggle_plugin(dsm, cx)).ok();
+                    }),
+            )
+    }
+
+    fn fallacy_pane(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> Stateful<gpui::Div> {
+        let run = app.clone();
+        let mut page = div()
+            .id("fallacy-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px(px(16.))
+            .pb(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(section_label(theme, "FALLACIES"))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .whitespace_normal()
+                    .child("Laya reads each turn in this session. A hit stays a draft until someone reviews it."),
+            )
+            .child(
+                div()
+                    .font_family("JetBrains Mono")
+                    .text_size(px(11.))
+                    .text_color(theme.faint)
+                    .whitespace_normal()
+                    .child(self.plugin_note.clone().unwrap_or_else(|| self.laya_status.clone())),
+            )
+            .child(text_button("run-fallacies", "Run on this session", run, theme, |this, cx| {
+                this.run_fallacies(cx);
+            }));
+        if self.fallacy_hits.is_empty() {
+            page = page.child(div().text_size(px(13.)).text_color(theme.muted).whitespace_normal().child("No fallacy findings for this session yet."));
+        }
+        for hit in &self.fallacy_hits {
+            page = page.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(theme.warn).child(hit.kind.clone()))
+                            .child(div().text_size(px(12.)).text_color(theme.faint).child(format!("{}  {:.0}%", hit.speaker, hit.noul * 100.0))),
+                    )
+                    .child(div().text_size(px(13.)).whitespace_normal().child(hit.quote.clone()))
+                    .child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(hit.label.clone())),
+            );
+        }
+        page
+    }
+
+    fn profile_pane(&self, app: gpui::WeakEntity<Self>, theme: Theme) -> Stateful<gpui::Div> {
+        let run = app.clone();
+        let chosen = self
+            .profiles
+            .iter()
+            .find(|profile| Some(profile.speaker.as_str()) == self.profile_speaker.as_deref())
+            .or_else(|| self.profiles.first());
+        let mut page = div()
+            .id("profile-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px(px(16.))
+            .pb(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .child(section_label(theme, "DSM-5"))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .whitespace_normal()
+                    .child("Laya scores evidence themes for each speaker label across the library. Bonsai can correlate those themes. This is not a diagnosis."),
+            )
+            .child(
+                div()
+                    .font_family("JetBrains Mono")
+                    .text_size(px(11.))
+                    .text_color(theme.faint)
+                    .whitespace_normal()
+                    .child(self.plugin_note.clone().unwrap_or_else(|| self.laya_status.clone())),
+            )
+            .child(text_button("run-profiles", "Update profiles", run, theme, |this, cx| {
+                this.run_profiles(cx);
+            }));
+        let mut row = div().flex().flex_wrap().gap(px(6.));
+        for profile in &self.profiles {
+            let speaker = profile.speaker.clone();
+            let on = chosen.map(|item| item.speaker.as_str()) == Some(profile.speaker.as_str());
+            let app = app.clone();
+            row = row.child(
+                div()
+                    .id(format!("profile-{}", profile.slug))
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .bg(if on { theme.bone } else { theme.raised })
+                    .text_color(if on { theme.ink } else { theme.muted })
+                    .child(profile.speaker.clone())
+                    .on_click(move |_event, _window, cx| {
+                        let speaker = speaker.clone();
+                        app.update(cx, |this, cx| {
+                            this.profile_speaker = Some(speaker);
+                            cx.notify();
+                        })
+                        .ok();
+                    }),
+            );
+        }
+        page = page.child(row);
+        if let Some(profile) = chosen {
+            page = page.child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(profile.speaker.clone()));
+            for theme_score in &profile.themes {
+                page = page.child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .gap(px(8.))
+                        .child(div().text_size(px(13.)).child(theme_score.label.clone()))
+                        .child(
+                            div()
+                                .font_family("JetBrains Mono")
+                                .text_size(px(12.))
+                                .text_color(theme.muted)
+                                .child(format!("{:.2}", theme_score.score)),
+                        ),
+                );
+            }
+            page = page.child(section_label(theme, "SESSIONS"));
+            for session in &profile.sessions {
+                page = page.child(div().text_size(px(13.)).child(session.title.clone()));
+            }
+            page = page.child(section_label(theme, "CORRELATION"));
+            let correlation = if profile.correlation.is_empty() {
+                self.bonsai_status.clone()
+            } else {
+                profile.correlation.clone()
+            };
+            page = page.child(div().text_size(px(13.)).whitespace_normal().child(correlation));
+        } else {
+            page = page.child(div().text_size(px(13.)).text_color(theme.muted).whitespace_normal().child("No profiles yet. Update profiles after Laya is on disk."));
+        }
+        page
     }
 }
 
@@ -811,7 +1797,7 @@ fn empty_stage(theme: Theme) -> gpui::Div {
         )
 }
 
-fn stage_header(recording: &Recording, theme: Theme) -> gpui::Div {
+fn stage_header(recording: &Recording, theme: Theme, slim: bool) -> gpui::Div {
     let (fast, short, overlap) = srt::review_counts(&recording.cues);
     let mut review = Vec::new();
     if fast > 0 {
@@ -845,32 +1831,34 @@ fn stage_header(recording: &Recording, theme: Theme) -> gpui::Div {
     }
 
     div()
-        .px(px(24.))
-        .pt(px(16.))
-        .pb(px(12.))
+        .px(px(if slim { 14.0 } else { 24.0 }))
+        .pt(px(if slim { 12.0 } else { 16.0 }))
+        .pb(px(if slim { 8.0 } else { 12.0 }))
         .flex()
         .flex_col()
         .gap(px(4.))
         .child(
             div()
-                .text_size(px(20.))
+                .text_size(px(if slim { 16.0 } else { 20.0 }))
                 .font_weight(FontWeight::SEMIBOLD)
+                .truncate()
                 .child(recording.title.clone()),
         )
         .child(div().text_size(px(12.)).text_color(theme.muted).child(recording.detail.clone()))
         .child(
             div()
                 .flex()
-                .gap(px(12.))
+                .flex_wrap()
+                .gap(px(8.))
                 .text_size(px(12.))
-                .child(div().text_color(theme.faint).child(meta))
+                .child(div().text_color(theme.faint).whitespace_normal().child(meta))
                 .when(!review.is_empty(), |row| {
                     row.child(div().text_color(theme.warn).child(review.join("  ·  ")))
                 }),
         )
 }
 
-fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme: Theme) -> gpui::Div {
+fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme: Theme, height: f32) -> gpui::Div {
     let cue = inspected.and_then(|index| recording.cues.get(index));
     let active = cue.filter(|cue| cue.start_ms as f64 <= playhead && playhead < cue.end_ms as f64);
     let upcoming = cue.filter(|_| active.is_none());
@@ -880,9 +1868,11 @@ fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme
         .map(|cue| cue.text.lines().map(str::to_string).collect())
         .unwrap_or_default();
 
+    let tight = height < 190.0;
     let mut screen = div()
         .size_full()
         .relative()
+        .overflow_hidden()
         .bg(theme.monitor)
         .child(corner(true, true))
         .child(corner(false, true))
@@ -914,13 +1904,13 @@ fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme
 
     let mut stack = div()
         .absolute()
-        .bottom(px(28.))
-        .left(px(48.))
-        .right(px(48.))
+        .bottom(px(if tight { 12.0 } else { 28.0 }))
+        .left(px(if tight { 12.0 } else { 48.0 }))
+        .right(px(if tight { 12.0 } else { 48.0 }))
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(6.));
+        .gap(px(if tight { 3.0 } else { 6.0 }));
     if let Some(cue) = upcoming {
         let wait = (cue.start_ms as f64 - playhead).max(0.0) / 1000.0;
         stack = stack.child(
@@ -956,7 +1946,8 @@ fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme
     for line in lines {
         stack = stack.child(
             div()
-                .px(px(10.))
+                .w_full()
+                .px(px(if tight { 2.0 } else { 10.0 }))
                 .py(px(2.))
                 .rounded(px(3.))
                 .bg(with_alpha(theme.monitor, 0.0))
@@ -965,9 +1956,11 @@ fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme
                         .px(px(8.))
                         .py(px(1.))
                         .bg(gpui::rgba(0x000000B0))
-                        .text_size(px(22.))
+                        .text_size(px(if tight { 15.0 } else { 22.0 }))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.bone)
+                        .whitespace_normal()
+                        .text_center()
                         .child(line),
                 ),
         );
@@ -978,17 +1971,18 @@ fn monitor(recording: &Recording, inspected: Option<usize>, playhead: f64, theme
     screen = screen.child(stack);
 
     div()
-        .px(px(24.))
+        .px(px(if tight { 12.0 } else { 24.0 }))
         .pb(px(4.))
         .child(
             div()
-                .h(px(228.))
+                .h(px(height))
                 .w_full()
+                .overflow_hidden()
                 .rounded(px(12.))
                 .bg(rgb_bezel())
                 .border_1()
                 .border_color(theme.line)
-                .p(px(8.))
+                .p(px(if tight { 4.0 } else { 8.0 }))
                 .child(screen),
         )
 }
@@ -1002,14 +1996,15 @@ fn timeline(
     picked: Option<usize>,
     app: gpui::WeakEntity<Studio>,
     theme: Theme,
+    slim: bool,
 ) -> gpui::Div {
     let duration = recording.duration_ms.max(1) as f64;
     let lane_of = srt::lanes(&recording.cues);
     let lane_count = lane_of.iter().copied().max().unwrap_or(0).min(3) + 1;
     let end = origin + span;
-    let bars = waveform_bars(&recording.peaks, origin, span, duration, 120);
+    let bars = waveform_bars(&recording.peaks, origin, span, duration, if slim { 64 } else { 120 });
 
-    let mut wave = div().h(px(36.)).w_full().flex().items_end().gap(px(1.));
+    let mut wave = div().h(px(if slim { 22.0 } else { 36.0 })).w_full().flex().items_end().gap(px(1.));
     for (index, peak) in bars.iter().enumerate() {
         let center = origin + span * ((index as f64 + 0.5) / bars.len().max(1) as f64);
         let hot = (center - playhead).abs() < span / bars.len().max(1) as f64;
@@ -1268,6 +2263,7 @@ fn cue_sheet(
     sheet: &ScrollHandle,
     app: gpui::WeakEntity<Studio>,
     theme: Theme,
+    slim: bool,
 ) -> gpui::Div {
     let highlight = if recording.cues.is_empty() {
         None
@@ -1312,20 +2308,22 @@ fn cue_sheet(
                     app.update(cx, |this, cx| this.seek_cue(index, cx)).ok();
                 })
                 .child(div().w(px(3.)).h(px(18.)).rounded_full().bg(speaker_color(&name)).flex_none())
-                .child(mono_cell(36.0, format!("{:02}", cue.index), theme.faint))
-                .child(mono_cell(118.0, srt::srt_stamp(cue.start_ms), theme.muted))
-                .child(mono_cell(118.0, srt::srt_stamp(cue.end_ms), theme.muted))
+                .child(mono_cell(if slim { 28.0 } else { 36.0 }, format!("{:02}", cue.index), theme.faint))
+                .child(mono_cell(if slim { 96.0 } else { 118.0 }, srt::srt_stamp(cue.start_ms), theme.muted))
+                .when(!slim, |row| row.child(mono_cell(118.0, srt::srt_stamp(cue.end_ms), theme.muted)))
                 .child(mono_cell(40.0, cps, if note.fast || note.short { theme.warn } else { theme.muted }))
-                .child(
-                    div()
-                        .w(px(92.))
-                        .flex_none()
-                        .truncate()
-                        .text_size(px(11.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(speaker_color(&name))
-                        .child(if name.is_empty() { "—".to_string() } else { name }),
-                )
+                .when(!slim, |row| {
+                    row.child(
+                        div()
+                            .w(px(92.))
+                            .flex_none()
+                            .truncate()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(speaker_color(&name))
+                            .child(if name.is_empty() { "—".to_string() } else { name }),
+                    )
+                })
                 .child(div().flex_1().min_w_0().truncate().child(cue.plain())),
         );
     }
@@ -1335,11 +2333,11 @@ fn cue_sheet(
         .min_h_0()
         .flex()
         .flex_col()
-        .child(sheet_header(theme))
+        .child(sheet_header(theme, slim))
         .child(rows)
 }
 
-fn sheet_header(theme: Theme) -> gpui::Div {
+fn sheet_header(theme: Theme, slim: bool) -> gpui::Div {
     div()
         .h(px(28.))
         .px(px(16.))
@@ -1352,11 +2350,11 @@ fn sheet_header(theme: Theme) -> gpui::Div {
         .border_b_1()
         .border_color(theme.line)
         .child(div().w(px(3.)).flex_none())
-        .child(header_cell(36.0, "#"))
-        .child(header_cell(118.0, "IN"))
-        .child(header_cell(118.0, "OUT"))
+        .child(header_cell(if slim { 28.0 } else { 36.0 }, "#"))
+        .child(header_cell(if slim { 96.0 } else { 118.0 }, "IN"))
+        .when(!slim, |row| row.child(header_cell(118.0, "OUT")))
         .child(header_cell(40.0, "CPS"))
-        .child(header_cell(92.0, "SPEAKER"))
+        .when(!slim, |row| row.child(header_cell(92.0, "SPEAKER")))
         .child(div().flex_1().child("CAPTION"))
 }
 
@@ -1603,7 +2601,13 @@ fn srt_source(cue: &Cue, theme: Theme) -> gpui::Div {
     well
 }
 
-fn sidebar_footer(app: gpui::WeakEntity<Studio>, theme: Theme, toast: Option<String>) -> gpui::Div {
+fn sidebar_footer(
+    app: gpui::WeakEntity<Studio>,
+    models: gpui::WeakEntity<Studio>,
+    theme: Theme,
+    toast: Option<String>,
+    models_on: bool,
+) -> gpui::Div {
     let mut footer = div()
         .p(px(12.))
         .border_t_1()
@@ -1611,6 +2615,29 @@ fn sidebar_footer(app: gpui::WeakEntity<Studio>, theme: Theme, toast: Option<Str
         .flex()
         .flex_col()
         .gap(px(8.))
+        .child(
+            div()
+                .id("open-models")
+                .h(px(32.))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .border_1()
+                .border_color(if models_on { theme.bone } else { theme.line })
+                .text_color(if models_on { theme.bone } else { theme.muted })
+                .child("Models")
+                .on_click(move |_event, _window, cx| {
+                    models.update(cx, |this, cx| {
+                        this.screen = Screen::Models;
+                        cx.notify();
+                    }).ok();
+                }),
+        )
         .child(
             div()
                 .id("import-srt")
@@ -1838,4 +2865,288 @@ fn rgb_quiet() -> gpui::Rgba {
 
 fn rgb_bezel() -> gpui::Rgba {
     gpui::rgb(0x08090B)
+}
+
+fn text_button(
+    id: &'static str,
+    label: &'static str,
+    app: gpui::WeakEntity<Studio>,
+    theme: Theme,
+    action: fn(&mut Studio, &mut Context<Studio>),
+) -> Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .h(px(26.))
+        .px(px(8.))
+        .flex()
+        .items_center()
+        .rounded(px(6.))
+        .cursor_pointer()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .border_1()
+        .border_color(theme.line)
+        .child(label)
+        .on_click(move |_event, _window, cx| {
+            app.update(cx, |this, cx| action(this, cx)).ok();
+        })
+}
+
+fn model_card(
+    theme: Theme,
+    title: &str,
+    engine: &str,
+    field_id: &'static str,
+    state: &Entity<EditableTextState>,
+    placeholder: &'static str,
+    status: &str,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).child(title.to_string()))
+        .child(div().text_size(px(12.)).text_color(theme.faint).child(engine.to_string()))
+        .child(model_field(theme, field_id, state, placeholder))
+        .child(
+            div()
+                .font_family("JetBrains Mono")
+                .text_size(px(11.))
+                .text_color(theme.muted)
+                .child(status.to_string()),
+        )
+}
+
+fn model_field(
+    theme: Theme,
+    id: &'static str,
+    state: &Entity<EditableTextState>,
+    placeholder: &'static str,
+) -> impl IntoElement {
+    text_input(id)
+        .state(state.downgrade())
+        .placeholder(placeholder)
+        .placeholder_color(theme.faint)
+        .caret_color(gpui::rgb_to_hsla(theme.bone))
+        .w_full()
+        .min_h_auto()
+        .max_h_auto()
+        .whitespace_nowrap()
+        .px(px(10.))
+        .py(px(6.))
+        .rounded(px(7.))
+        .text_size(px(12.))
+        .font_family("JetBrains Mono")
+        .border_1()
+        .border_color(theme.line)
+        .bg(theme.bg)
+}
+
+fn package_page(
+    recording: Option<&Recording>,
+    selected: Option<&str>,
+    app: gpui::WeakEntity<Studio>,
+    theme: Theme,
+) -> Stateful<gpui::Div> {
+    let Some(recording) = recording else {
+        return quiet(theme, "Open a recording to see its package.");
+    };
+    let bundle = &recording.bundle;
+    if !bundle.packaged && bundle.concepts.is_empty() {
+        return quiet(theme, "This session has no OKF package.");
+    }
+    let chosen = bundle
+        .concepts
+        .iter()
+        .find(|concept| Some(concept.id.as_str()) == selected)
+        .or_else(|| bundle.concepts.first());
+    let mut page = div()
+        .id("package-scroll")
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .px(px(16.))
+        .pb(px(20.))
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .child(section_label(theme, "PACKAGE"))
+        .child(
+            div()
+                .text_size(px(16.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .whitespace_normal()
+                .child(if bundle.title.is_empty() { recording.title.clone() } else { bundle.title.clone() }),
+        )
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.faint)
+                .whitespace_normal()
+                .child(format!(
+                    "OKF {} · {} concepts · {} assets",
+                    if bundle.version.is_empty() { "bundle" } else { bundle.version.as_str() },
+                    bundle.concepts.len(),
+                    bundle.assets.len()
+                )),
+        );
+    if !bundle.description.is_empty() {
+        page = page.child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .whitespace_normal()
+                .child(bundle.description.clone()),
+        );
+    }
+    page = page.child(section_label(theme, "CONCEPTS"));
+    for concept in &bundle.concepts {
+        let on = chosen.map(|item| item.id == concept.id).unwrap_or(false);
+        let id = concept.id.clone();
+        let app = app.clone();
+        page = page.child(
+            div()
+                .id(format!("concept-{id}"))
+                .px(px(8.))
+                .py(px(6.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .bg(if on { theme.raised } else { theme.bg })
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .on_click(move |_event, _window, cx| {
+                    app.update(cx, |this, cx| {
+                        this.concept = Some(id.clone());
+                        this.pane = Pane::Package;
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(theme.faint)
+                                .child(concept.type_name.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(12.))
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(concept.title.clone()),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(if concept.status != "stable" { theme.warn } else { theme.muted })
+                        .child(format!("{} · {}", concept.status, concept.trust.label())),
+                ),
+        );
+    }
+    if let Some(concept) = chosen {
+        page = page.child(concept_detail(concept, theme));
+    }
+    page = page.child(section_label(theme, "ASSETS"));
+    if bundle.assets.is_empty() {
+        page = page.child(div().text_size(px(12.)).text_color(theme.faint).child("No assets in this package."));
+    }
+    for asset in &bundle.assets {
+        page = page.child(
+            div()
+                .flex()
+                .justify_between()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .font_family("JetBrains Mono")
+                        .text_size(px(12.))
+                        .child(asset.name.clone()),
+                )
+                .child(
+                    div()
+                        .font_family("JetBrains Mono")
+                        .text_size(px(11.))
+                        .text_color(theme.faint)
+                        .child(format_bytes(asset.bytes)),
+                ),
+        );
+    }
+    if !bundle.log.is_empty() {
+        page = page.child(section_label(theme, "LOG")).child(
+            div()
+                .p(px(10.))
+                .rounded(px(8.))
+                .bg(theme.stage)
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .whitespace_normal()
+                .child(bundle.log.clone()),
+        );
+    }
+    page
+}
+
+fn concept_detail(concept: &Concept, theme: Theme) -> gpui::Div {
+    let mut detail = div()
+        .p(px(10.))
+        .rounded(px(8.))
+        .bg(theme.stage)
+        .flex()
+        .flex_col()
+        .gap(px(6.))
+        .child(section_label(theme, "CONCEPT"))
+        .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).whitespace_normal().child(concept.title.clone()));
+    if !concept.description.is_empty() {
+        detail = detail.child(div().text_size(px(12.)).text_color(theme.muted).whitespace_normal().child(concept.description.clone()));
+    }
+    if !concept.resource.is_empty() {
+        detail = detail.child(path_block(&concept.resource, theme));
+    }
+    if !concept.tags.is_empty() {
+        detail = detail.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.faint)
+                .whitespace_normal()
+                .child(concept.tags.join(" · ")),
+        );
+    }
+    if !concept.generated_by.is_empty() {
+        detail = detail.child(div().text_size(px(11.)).text_color(theme.faint).whitespace_normal().child(format!("Generated by {}", concept.generated_by)));
+    }
+    if !concept.verified_by.is_empty() {
+        detail = detail.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.faint)
+                .whitespace_normal()
+                .child(format!("Verified by {}", concept.verified_by.join(", "))),
+        );
+    }
+    if !concept.body.is_empty() {
+        detail = detail.child(div().text_size(px(12.)).whitespace_normal().child(concept.body.clone()));
+    }
+    detail
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.0} KB", bytes as f32 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f32 / (1024.0 * 1024.0))
+    }
 }
