@@ -10,6 +10,7 @@ use gpui_ce_elements::editable_text::{
 };
 use gpui_ce_elements::editable_text::actions::DEFAULT_INPUT_CONTEXT;
 
+use crate::audio;
 use crate::config::{self, PluginSettings};
 use crate::library::{self, Recording};
 use crate::okf::Concept;
@@ -74,6 +75,8 @@ pub struct Studio {
     playhead: f64,
     playing: bool,
     speed: f64,
+    audio: audio::Output,
+    audio_note: Option<String>,
     follow: bool,
     zoom_ms: Option<f64>,
     origin: f64,
@@ -154,6 +157,8 @@ impl Studio {
             playhead: 0.0,
             playing: false,
             speed: 1.0,
+            audio: audio::Output::start(),
+            audio_note: None,
             follow: true,
             zoom_ms: Some(90_000.0),
             origin: 0.0,
@@ -222,17 +227,33 @@ impl Studio {
     }
 
     fn tick(&mut self, window: &mut Window) {
+        if let Some(err) = self.audio.take_error() {
+            self.audio_note = Some(err.clone());
+            self.toast = Some(err);
+        } else if self.audio.ready() && !self.audio.failed() {
+            self.audio_note = None;
+        }
         if !self.playing {
             return;
         }
-        let now = Instant::now();
-        let dt = now.saturating_duration_since(self.last_tick).as_secs_f64().min(0.1);
-        self.last_tick = now;
         let duration = self.duration();
-        self.playhead = (self.playhead + dt * 1000.0 * self.speed).min(duration);
-        if self.playhead >= duration {
-            self.playing = false;
-            return;
+        let has_audio = self.current().and_then(|recording| recording.source.as_ref()).is_some();
+        if has_audio && !self.audio.failed() {
+            if self.audio.ended() {
+                self.playing = false;
+                self.playhead = duration;
+                return;
+            }
+            self.playhead = (self.audio.position_ms() as f64).min(duration);
+        } else {
+            let now = Instant::now();
+            let dt = now.saturating_duration_since(self.last_tick).as_secs_f64().min(0.1);
+            self.last_tick = now;
+            self.playhead = (self.playhead + dt * 1000.0 * self.speed).min(duration);
+            if self.playhead >= duration {
+                self.playing = false;
+                return;
+            }
         }
         if self.follow {
             self.reveal(self.playhead);
@@ -306,18 +327,52 @@ impl Studio {
         if self.editing(window, cx) || self.duration() <= 0.0 {
             return;
         }
-        self.playing = !self.playing;
-        self.last_tick = Instant::now();
-        if self.playing && self.playhead >= self.duration() {
+        self.set_playing(!self.playing, cx);
+    }
+
+    fn set_playing(&mut self, playing: bool, cx: &mut Context<Self>) {
+        if self.duration() <= 0.0 {
+            return;
+        }
+        if playing && self.playhead >= self.duration() {
             self.playhead = 0.0;
             self.origin = 0.0;
         }
+        self.playing = playing;
+        self.last_tick = Instant::now();
+        self.sync_audio(true);
         cx.notify();
+    }
+
+    fn set_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
+        self.speed = speed;
+        if self.playing {
+            self.sync_audio(true);
+        }
+        cx.notify();
+    }
+
+    fn sync_audio(&mut self, seek: bool) {
+        let Some(path) = self.current().and_then(|recording| recording.source.clone()) else {
+            self.audio.stop();
+        if self.playing {
+            let note = "This recording has no audio file.".to_string();
+            self.toast = Some(note.clone());
+            self.audio_note = Some(note);
+        }
+        return;
+    };
+    if self.playing {
+        self.audio_note = None;
+    }
+    self.audio.cue(&path, self.playhead.max(0.0) as u64, self.speed as f32, self.playing, seek);
     }
 
     fn choose(&mut self, id: &str, cx: &mut Context<Self>) {
         self.selected = Some(id.to_string());
         self.playing = false;
+        self.audio.stop();
+        self.audio_note = None;
         self.picked = None;
         self.tracked = None;
         self.speaker = None;
@@ -359,6 +414,9 @@ impl Studio {
         self.playhead = ms.clamp(0.0, self.duration());
         self.reveal(self.playhead);
         self.tracked = None;
+        if self.playing {
+            self.sync_audio(true);
+        }
         cx.notify();
     }
 
@@ -694,9 +752,7 @@ impl Studio {
                         play,
                         theme,
                         |this, cx| {
-                            this.playing = !this.playing;
-                            this.last_tick = Instant::now();
-                            cx.notify();
+                            this.set_playing(!this.playing, cx);
                         },
                     ))
                     .child(
@@ -1098,13 +1154,7 @@ impl Studio {
                 play,
                 theme,
                 |this, cx| {
-                    this.playing = !this.playing;
-                    this.last_tick = Instant::now();
-                    if this.playing && this.playhead >= this.duration() {
-                        this.playhead = 0.0;
-                        this.origin = 0.0;
-                    }
-                    cx.notify();
+                    this.set_playing(!this.playing, cx);
                 },
             ))
             .child(transport_button("cue-next", "Next", next, theme, |this, cx| {
@@ -1117,6 +1167,15 @@ impl Studio {
                     .text_size(px(13.))
                     .child(srt::transport_clock(self.playhead)),
             )
+            .when_some(self.audio_note.clone(), |row, note| {
+                row.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.warn)
+                        .truncate()
+                        .child(note),
+                )
+            })
             .child(
                 div()
                     .font_family("JetBrains Mono")
@@ -1134,11 +1193,7 @@ impl Studio {
             let app = app.clone();
             let on = (self.speed - value).abs() < 0.01;
             row = row.child(chip(id, label, on, theme).on_click(move |_event, _window, cx| {
-                app.update(cx, |this, cx| {
-                    this.speed = value;
-                    cx.notify();
-                })
-                .ok();
+                app.update(cx, |this, cx| this.set_speed(value, cx)).ok();
             }));
         }
         row = row.child(chip("follow", "Follow", follow_on, theme).on_click(move |_event, _window, cx| {

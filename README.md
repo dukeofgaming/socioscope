@@ -13,7 +13,7 @@ cd desktop
 cargo run --release
 ```
 
-It opens the sample library (Roosevelt's first inaugural, the "ask not" excerpt, and a three-speaker sample). Import any `.srt` from the sidebar. Space plays, and the left and right keys move between cues. The window reflows for a tablet, a phone, and a watch-sized frame.
+It opens the sample library (Roosevelt's first inaugural, the "ask not" excerpt, and a three-speaker sample). Import any `.srt` from the sidebar. Space plays the session audio and moves the caption with it. The left and right keys move between cues. The window reflows for a tablet, a phone, and a watch-sized frame.
 
 Each session is an [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format) 0.3 bundle. The Package tab lists the concepts, assets, and log in that bundle.
 
